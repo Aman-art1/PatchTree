@@ -3,8 +3,7 @@
 .env.*
 !.env.example
 
-# Cursor MCP config (holds your Supabase/GitHub tokens)
-**/.cursor/mcp.json
+# Cursor folder (MCP tokens, plans, local settings)
 .cursor/
 
 # Python
