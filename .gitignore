@@ -5,6 +5,7 @@
 
 # Cursor MCP config (holds your Supabase/GitHub tokens)
 **/.cursor/mcp.json
+.cursor/
 
 # Python
 .venv/
