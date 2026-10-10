@@ -1,4 +1,4 @@
-"""Phase 1 Sub-step 3: Evaluate & Replan — end-to-end run_pipeline state machine."""
+"""SearchNode fan-out, evaluation, replan, and pipeline orchestration."""
 import asyncio
 import logging
 import re
@@ -270,7 +270,7 @@ async def run_pipeline(
     sandbox: SandboxManager | None = None,
 ) -> tuple[Run, list[Node]]:
     """
-    Phase 1 end-to-end state machine:
+    End-to-end patch search state machine:
     reproduce -> search_round -> evaluate_search -> replan -> repeat.
 
     Args:

@@ -1,4 +1,4 @@
-"""Test Phase 1 Sub-step 2: SearchNode 4-branch fan-out."""
+"""Tests for concurrent multi-branch search round."""
 import asyncio
 import sys
 import uuid

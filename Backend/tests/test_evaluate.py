@@ -1,4 +1,4 @@
-"""Test Phase 1 Sub-step 3: evaluate_search, replan, and run_pipeline."""
+"""Unit tests for search evaluation, replanning, and pipeline execution."""
 import asyncio
 import sys
 import uuid
