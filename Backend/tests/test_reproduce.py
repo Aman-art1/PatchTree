@@ -5,24 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.models.schemas import Node, Run, RunCreate
+from app.models.schemas import Run, RunCreate
+from app.orchestrator.pipeline import reproduce
 from app.sandbox.contree_client import SandboxManager
-
-
-def reproduce(run: Run, sandbox: SandboxManager) -> Node:
-    """ReproduceNode: boot sandbox, run target test, record the failing root node."""
-    sandbox.spawn("python:3.11")
-    result = sandbox.run_command(run.target_test)
-    return Node(
-        node_id=str(uuid.uuid4()),
-        run_id=run.run_id,
-        branch_type="root",
-        checkpoint_id=sandbox.checkpoint(),
-        test_command=run.target_test,
-        test_result="fail" if result.exit_code else "pass",
-        test_output=result.output,
-        status="done",
-    )
 
 
 def test_reproduce():
