@@ -1,5 +1,5 @@
 # Agent Instructions for PatchTree
-
+write quality code dont write too many redundant lines of code if a code can be written in 200 lines insetad of 400 lines without increasing the complexity too much write it in 200 lines with accuracy.
 ## Before marking any task done
 1. Run the code yourself (start the server, run the test, run the build) — don't just write it and assume it works.
 2. If there's an error, fix it and run it again before reporting back.
@@ -10,5 +10,5 @@
 - Backend: Python + FastAPI
 - Frontend: React + Vite + TypeScript
 - Database: Supabase (hosted Postgres) — not local Docker Postgres
-- AI calls and sandboxing go through Nebius Token Factory + Contree SDK
+- AI calls and sandboxing go through Nebius Token Factory + Contree SDK 
 - See /docs for full architecture, risks, and build plan before making structural changes
