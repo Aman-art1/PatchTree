@@ -25,3 +25,6 @@ Thumbs.db
 .idea/
 **/.vscode/settings.json
 .agents/**
+# Project docs and agent instructions (not for GitHub)
+docs/
+AGENTS.md

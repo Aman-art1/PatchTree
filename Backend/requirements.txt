@@ -1,3 +1,5 @@
 fastapi
 uvicorn
 contree-sdk
+openai
+python-dotenv
