@@ -11,33 +11,68 @@
   <img src="https://img.shields.io/badge/Nebius-Token_Factory-7C3AED?style=for-the-badge&logo=cloud&logoColor=white" alt="Nebius Token Factory" />
   <img src="https://img.shields.io/badge/NVIDIA-Nemotron_3-76B900?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA Nemotron 3" />
   <img src="https://img.shields.io/badge/Contree-Cloud_Sandboxes-0EA5E9?style=for-the-badge&logo=docker&logoColor=white" alt="Contree Sandboxes" />
-  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License MIT" />
+  <img src="https://img.shields.io/badge/License-MPL_2.0-blue?style=for-the-badge" alt="License MPL 2.0" />
 </p>
 
 ---
 
-## ⚡ The Problem & The Idea
+## ⚡ The Problem & The Solution
 
 Most coding agents follow a fragile loop: **read the bug → generate one patch → hope the test passes**.
 
-That’s a coin flip dressed up as software engineering. In real-world repositories:
-1. **First guesses are often wrong** — single-shot agents get stuck without alternative paths.
-2. **First passes are often lucky** — tests are frequently flaky (timing issues, test ordering, non-determinism).
-3. **Green tests can hide regressions** — patches can pass the named test while silently breaking edge cases.
+In production software, that is a coin flip dressed up as software engineering:
+- **First guesses are often wrong** — single-shot agents hit dead ends with no systematic fallback.
+- **First passes are often lucky** — tests are frequently flaky due to concurrency, timing, or execution order.
+- **Green tests can hide regressions** — patches can pass the named test while breaking edge cases or weakening assertions.
 
-**PatchTree treats program repair as an empirical search-and-verify tree:**
-- It **forks reality** at the exact checkpoint where a bug reproduces.
-- It explores **4 diverse repair strategies concurrently** in isolated sandboxes.
-- It **stress-tests the winner** across stability checks and adversarial test attacks before declaring victory.
+| Capability | Standard Single-Shot Agents | PatchTree |
+|---|---|---|
+| **Exploration Strategy** | Single sequential attempt | **4-Way Concurrent Search** across distinct hypotheses |
+| **Sandbox Isolation** | Reuses dirty container state | **Contree Snapshot Checkpointing & Clean Forking** |
+| **Flakiness Handling** | Assumes 1 green run = permanent fix | **5-Fork Stability Forensics** to verify true stability |
+| **Adversarial Hardening** | None (stops at first pass) | **Attack Forks** where a secondary model tries to break the patch |
+| **Recovery on Failure** | Blind prompt retry | **Nemotron Ultra Meta-Replan** analyzing failure traces |
+| **Final Output** | Unverified diff | **Diff + Decision-Ready Confidence Report + Execution Tree** |
 
 ---
 
-## 🌲 How It Works: The Verification Tree
+## 🔄 How Errors Are Solved: The Lifecycle
+
+PatchTree moves through five distinct verification stages:
+
+```mermaid
+flowchart LR
+    A["1. Reproduce<br/>& Checkpoint"] --> B["2. 4-Branch<br/>Concurrent Search"]
+    B --> C{"3. Evaluate<br/>& Forensics"}
+    C -->|Pass| D["4. Stability &<br/>Adversarial Check"]
+    C -->|All Fail| E["5. Ultra Replan<br/>(Analyze Traces)"]
+    E --> B
+    D --> F["6. Verified Patch<br/>+ Confidence Report"]
+```
+
+1. **Reproduction & Checkpoint A**  
+   The sandbox boots the environment, runs the target test command, confirms the exact failure trace, and saves **Checkpoint A**. If an error cannot be reproduced, execution halts honestly.
+2. **Concurrent Search Fan-Out**  
+   PatchTree forks four independent copies of Checkpoint A simultaneously:
+   - **Branch 1 (Minimal Fix — Nemotron Nano):** Direct, surgical patch targeting only the immediate symptom.
+   - **Branch 2 (Alternative Strategy — Nemotron Super):** Explores alternative implementations or refactoring.
+   - **Branch 3 (Root-Cause Fix — Nemotron Super):** Investigates deeper causes across callers or dependencies.
+   - **Branch 4 (Test-Driven Fix — Nemotron Nano):** Strictly implements expected contract specifications.
+3. **Flaky-Test Forensics**  
+   When a patch turns green, PatchTree does **not** stop there. It forks the winning checkpoint $k$ times ($k=5$) and re-runs the identical test command across all five forks in parallel to ensure the pass was deterministic.
+4. **Adversarial Self-Testing**  
+   A secondary model receives the code changes and attempts to generate targeted attack tests designed to break the fix. Patches that survive both stability checks and adversarial attacks earn high confidence.
+5. **Ultra-Tier Meta-Replan Loop**  
+   If all four branches fail in a round, Nemotron Ultra (550B) inspects the concatenated stdout/stderr traces from every failed attempt, diagnoses why they failed, and prescribes four revised strategies for the next round.
+
+---
+
+## 🌲 Tree Architecture
 
 ```mermaid
 flowchart TD
     subgraph Reproduction ["1. Reproduce"]
-        Root["🚨 Root Node<br/>Boot Sandbox & Confirm Bug Fails"]
+        Root["🚨 Root Node<br/>Confirm Test Failure & Checkpoint"]
     end
 
     subgraph Search ["2. 4-Branch Concurrent Search"]
@@ -49,7 +84,7 @@ flowchart TD
 
     subgraph EvalJoin ["3. Evaluation & Forensics"]
         Eval{"Evaluate<br/>Search"}
-        Stability["🛡️ Stability Forensics<br/>Fork 5x to rule out flakiness"]
+        Stability["🛡️ Stability Forensics<br/>Parallel Forks to rule out flakiness"]
         Replan["🧠 Meta-Replan<br/>(Nemotron Ultra analyzes traces)"]
     end
 
@@ -66,7 +101,7 @@ flowchart TD
     Eval -->|Passing Candidate| Stability
     Eval -->|All Failed| Replan
     Replan -->|Revised Strategies| Search
-    Stability -->|5/5 Passes| Winner
+    Stability -->|Verified Stable| Winner
     Stability -->|Flaky Failure| Replan
 ```
 
@@ -74,17 +109,15 @@ flowchart TD
 
 ## 🛠️ Tech Stack & Model Routing
 
-PatchTree pairs **Nebius Contree cloud sandboxing** with a **strictly tiered NVIDIA Nemotron cost strategy**:
-
 | Layer | Technology | Role & Why |
 |---|---|---|
 | **Cloud Sandboxes** | **Nebius Contree SDK** | Instant container checkpointing, parallel forking, and isolated execution. |
 | **Fast LLM Tier** | **NVIDIA Nemotron 3 Nano (30B)** | Cheap, high-throughput first-pass hypotheses and lightweight checks. |
-| **Deep LLM Tier** | **NVIDIA Nemotron 3 Super (120B)** | Architectural refactoring, root-cause repair, and adversarial test attacks. |
-| **Reasoning Tier** | **NVIDIA Nemotron 3 Ultra (550B)** | Failure-trace analysis across rounds, meta-planning, and final confidence reporting. |
+| **Deep LLM Tier** | **NVIDIA Nemotron 3 Super (120B)** | Architectural refactoring, root-cause repair, and adversarial test generation. |
+| **Reasoning Tier** | **NVIDIA Nemotron 3 Ultra (550B)** | Multi-trace failure analysis, meta-planning, and confidence reporting. |
 | **API Server** | **FastAPI + Pydantic v2** | High-concurrency async orchestrator managing background tree tasks. |
 | **Persistence** | **Supabase (PostgreSQL)** | Persistent storage for run metadata, node execution trees, and metrics. |
-| **Frontend** | **React + Vite + TypeScript** | Interactive live tree visualization (React Flow) and confidence diff inspect panel. |
+| **Frontend** | **React + Vite + TypeScript** | Interactive live tree visualization (React Flow) and diff inspection panel. |
 
 ---
 
@@ -106,6 +139,7 @@ PatchTree/
 ├── Frontend/                     # React + TypeScript tree visualization UI
 ├── docs/                         # Architecture, decision logs, and specifications
 ├── AGENTS.md                     # Agent engineering protocols
+├── LICENSE                       # Mozilla Public License 2.0
 └── README.md
 ```
 
@@ -163,16 +197,17 @@ Visit `http://localhost:8000/docs` to test interactive Swagger API endpoints.
 
 ---
 
-## 🏆 Hackathon Context
+## 🏆 Hackathon Context & Licensing
 
 Built for the **Nebius x NVIDIA Global AI Hackathon (October 2026)**.  
 *Track: Coding and Agentic Engineering (Agents that write, run, and test code in Token Factory Sandboxes).*
 
 - **Contree Primitives Exploited:** OCI lightweight image import, snapshot checkpoints, parallel child forking, and non-cached deterministic command execution.
 - **Model Efficiency:** Over 80% of tokens run on cheap Nano/Super endpoints, reserving 550B Ultra exclusively for failure reasoning.
+- **License:** Open-source software released under the **[Mozilla Public License 2.0 (MPL-2.0)](LICENSE)**.
 
 ---
 
 <p align="center">
-  <sub>Built with ❤️ by the PatchTree Team. Released under the MIT License.</sub>
+  <sub>Licensed under the <a href="LICENSE">Mozilla Public License 2.0</a>.</sub>
 </p>
