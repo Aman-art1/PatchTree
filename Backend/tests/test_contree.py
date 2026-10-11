@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
-env_path = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(dotenv_path=env_path)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 api_key = os.getenv("NEBIUS_API_KEY")
 project_id = os.getenv("NEBIUS_PROJECT_ID")

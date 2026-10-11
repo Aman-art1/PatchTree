@@ -1,5 +1,5 @@
-"""Sandbox wrapper: real Contree SDK when available, in-memory stub otherwise."""
 import logging
+import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,14 +26,19 @@ class SandboxManager:
         self._image = None  # real mode: current image
         self._history: list[str] = []  # stub mode: commands applied so far
         self._checkpoints: dict[str, list[str]] = {}
-        if not force_stub:
-            try:
-                from contree_sdk import ContreeSync
 
-                self._client = ContreeSync()
-                self._client.get_token_info()
-            except Exception as e:
-                self._fallback(e)
+        api_key = os.environ.get("NEBIUS_API_KEY", "").strip()
+        if force_stub or not api_key or os.environ.get("PATCHTREE_FORCE_STUB", "").lower() in ("1", "true"):
+            self.stub = True
+            return
+
+        try:
+            from contree_sdk import ContreeSync
+
+            self._client = ContreeSync()
+            self._client.get_token_info()
+        except Exception as e:
+            self._fallback(e)
 
     def _fallback(self, err: Exception) -> None:
         logger.warning("Contree unavailable (%s); using stub sandbox", err)
@@ -50,18 +55,21 @@ class SandboxManager:
         self._history = [f"spawn {image}"]
 
     def run_command(self, cmd: str) -> CommandResult:
-        if not self.stub:
+        if not self.stub and self._image is not None:
             try:
                 img = self._image.run(shell=cmd, disposable=False).wait()
                 self._image = img
-                return CommandResult(img.exit_code, self._text(img.stdout) + self._text(img.stderr))
+                stdout = self._text(img.stdout)
+                stderr = self._text(img.stderr)
+                output = f"{stdout}\n{stderr}".strip() if stdout and stderr else (stdout or stderr)
+                return CommandResult(img.exit_code, output)
             except Exception as e:
                 self._fallback(e)
         return self._stub_run(cmd)
 
     def checkpoint(self) -> str:
         cid = str(uuid.uuid4())
-        if not self.stub:
+        if not self.stub and self._image is not None:
             try:
                 cid = str(self._image.uuid)
                 return cid

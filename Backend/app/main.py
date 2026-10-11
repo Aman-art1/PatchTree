@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status
@@ -30,7 +30,9 @@ async def _run_pipeline(run: Run) -> None:
     except Exception:
         logger.exception("Pipeline failed for run %s", run.run_id)
         run.status = "failed"
-        run.completed_at = datetime.now(UTC)
+        run.completed_at = datetime.now(timezone.utc)
+        if run.created_at:
+            run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
 
 
 @app.post("/runs", response_model=Run, status_code=status.HTTP_201_CREATED)
@@ -39,7 +41,7 @@ async def create_run(request: RunCreate, background_tasks: BackgroundTasks) -> R
         **request.model_dump(),
         run_id=str(uuid4()),
         status="running",
-        created_at=datetime.now(UTC),
+        created_at=datetime.now(timezone.utc),
     )
     runs[run.run_id] = run
     nodes[run.run_id] = []

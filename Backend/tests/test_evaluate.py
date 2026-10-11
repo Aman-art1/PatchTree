@@ -174,8 +174,8 @@ async def test_replan():
 async def test_run_pipeline_winner_round_1():
     print("\n=== test_run_pipeline_winner_round_1 ===")
     run = _make_run()
-
-    final_run, all_nodes = await pipeline.run_pipeline(run, max_rounds=2)
+    stub_sandbox = SandboxManager(force_stub=True)
+    final_run, all_nodes = await pipeline.run_pipeline(run, max_rounds=2, sandbox=stub_sandbox)
 
     # Default stub passes tests after apply_patch, so round 1 finds a winner
     assert final_run.status == "complete", f"expected complete, got {final_run.status}"

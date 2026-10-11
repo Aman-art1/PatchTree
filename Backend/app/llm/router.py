@@ -70,6 +70,20 @@ async def call_model(job: str, prompt: str, system_prompt: str | None = None, te
         except Exception as e:
             logger.warning("Nebius call failed for %s (%s); using stub response", model, e)
 
+    if job == "replan_after_failure":
+        return {
+            "content": (
+                "1. Focus on the core assertion failure and fix edge-case values.\n"
+                "2. Check input validation and boundary conditions.\n"
+                "3. Refactor conditional logic to handle unexpected state.\n"
+                "4. Address caller expectations and align return types."
+            ),
+            "model": f"stub/{model}",
+            "tokens_in": len(prompt.split()),
+            "tokens_out": 40,
+            "stub": True,
+        }
+
     return {
         "content": f"[stub:{job}] --- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-return 1\n+return 2\n",
         "model": f"stub/{model}",

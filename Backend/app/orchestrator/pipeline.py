@@ -147,6 +147,14 @@ async def replan(run: Run, failed_branches: list[Node]) -> list[str]:
     return guidance
 
 
+def extract_diff(content: str) -> str:
+    """Extract unified diff from model response, stripping markdown fences if present."""
+    match = re.search(r"```(?:diff|patch)?\s*\n([\s\S]*?)\n```", content)
+    if match:
+        return match.group(1).strip()
+    return content.strip()
+
+
 async def _execute_branch(
     run: Run,
     parent_node: Node,
@@ -176,17 +184,23 @@ async def _execute_branch(
     # Call the model
     model_response = await call_model(job=job, prompt=prompt, temperature=temperature)
 
-    # Extract patch from response (assume it's in the content)
-    patch_diff = model_response["content"]
-    hypothesis = f"{job}: {patch_diff[:100]}..."  # First 100 chars as hypothesis
+    # Extract patch from response (clean markdown fences if model wrapped the diff)
+    raw_content = model_response.get("content", "")
+    patch_diff = extract_diff(raw_content) or raw_content
+    hypothesis = f"{job}: {patch_diff[:100]}..."
 
     # Apply the patch in the forked sandbox
     apply_result = fork.run_command(f"apply_patch {node_id}.diff")
     logger.debug(f"Branch {branch_index + 1}: patch apply exit_code={apply_result.exit_code}")
 
-    # Run the test
-    test_result_obj = fork.run_command(parent_node.test_command or run.target_test)
-    test_result: Literal["pass", "fail", "error"] = "pass" if test_result_obj.exit_code == 0 else "fail"
+    if apply_result.exit_code != 0:
+        test_result: Literal["pass", "fail", "error"] = "error"
+        test_output = f"Patch application failed:\n{apply_result.output}"
+    else:
+        # Run the test
+        test_result_obj = fork.run_command(parent_node.test_command or run.target_test)
+        test_result = "pass" if test_result_obj.exit_code == 0 else "fail"
+        test_output = test_result_obj.output
 
     # Create checkpoint after applying patch
     checkpoint_id = fork.checkpoint()
@@ -201,7 +215,7 @@ async def _execute_branch(
         patch_diff=patch_diff,
         test_command=parent_node.test_command or run.target_test,
         test_result=test_result,
-        test_output=test_result_obj.output,
+        test_output=test_output,
         model_used=model_response["model"],
         tokens_in=model_response["tokens_in"],
         tokens_out=model_response["tokens_out"],
@@ -303,6 +317,9 @@ async def run_pipeline(
             run.status = "complete"
             run.winner_node_id = winner.node_id
             run.completed_at = datetime.now(timezone.utc)
+            if run.created_at:
+                run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
+            run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
             logger.info(f"Pipeline complete: winner {winner.node_id} in round {round_num}")
             return run, all_nodes
 
@@ -312,5 +329,8 @@ async def run_pipeline(
 
     run.status = "failed"
     run.completed_at = datetime.now(timezone.utc)
+    if run.created_at:
+        run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
+    run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
     logger.info(f"Pipeline failed: no passing patch after {max_rounds} rounds")
     return run, all_nodes
