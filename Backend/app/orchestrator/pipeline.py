@@ -221,6 +221,7 @@ async def search_round(
     parent_node: Node,
     round_num: int = 1,
     guidance: list[str] | None = None,
+    sandbox: SandboxManager | None = None,
 ) -> list[Node]:
     """
     Execute a single search round with 4 concurrent branches from parent_node.
@@ -231,6 +232,7 @@ async def search_round(
         round_num: Round number for logging (default: 1)
         guidance: Optional revised strategies from replan(); guidance[i] is
             appended to branch i's prompt when present.
+        sandbox: Optional sandbox instance (defaults to SandboxManager()).
 
     Returns:
         List of 4 Node objects, one per search branch
@@ -239,8 +241,9 @@ async def search_round(
 
     # Create a parent sandbox from the parent checkpoint
     # We'll reuse this to fork for each branch
-    parent_sandbox = SandboxManager(force_stub=True)  # TODO: Remove force_stub when Contree is available
-    parent_sandbox._checkpoints[parent_node.checkpoint_id] = []  # Ensure checkpoint exists
+    parent_sandbox = sandbox or SandboxManager()
+    if parent_sandbox.stub:
+        parent_sandbox._checkpoints.setdefault(parent_node.checkpoint_id, [])
 
     # Build tasks for concurrent execution
     tasks = [
@@ -276,13 +279,13 @@ async def run_pipeline(
     Args:
         run: The Run to process.
         max_rounds: Maximum number of search rounds before giving up.
-        sandbox: Optional sandbox for the reproduce step (stub by default).
+        sandbox: Optional sandbox instance (defaults to SandboxManager()).
 
     Returns:
         (updated_run, all_nodes_created). On success run.status is "complete"
         and run.winner_node_id is set; otherwise run.status is "failed".
     """
-    sandbox = sandbox or SandboxManager(force_stub=True)  # TODO: Remove force_stub when Contree is available
+    sandbox = sandbox or SandboxManager()
     all_nodes: list[Node] = []
     run.status = "running"
 
@@ -292,7 +295,7 @@ async def run_pipeline(
 
     guidance: list[str] | None = None
     for round_num in range(1, max_rounds + 1):
-        branches = await search_round(run, root_node, round_num=round_num, guidance=guidance)
+        branches = await search_round(run, root_node, round_num=round_num, guidance=guidance, sandbox=sandbox)
         all_nodes.extend(branches)
 
         winner = evaluate_search(branches)

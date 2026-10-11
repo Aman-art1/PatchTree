@@ -35,7 +35,7 @@ async def test_search_round():
     assert root_node.test_result == "fail", "Root node should have failing test"
 
     # Run search_round to fan out 4 branches
-    search_nodes = await search_round(run, root_node, round_num=1)
+    search_nodes = await search_round(run, root_node, round_num=1, sandbox=sandbox)
 
     print(f"\n=== Search Round Results ===")
     print(f"Total nodes created: {len(search_nodes)}")

@@ -2,6 +2,11 @@
 import logging
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +71,23 @@ class SandboxManager:
         return cid
 
     def fork(self, checkpoint_id: str) -> "SandboxManager":
-        child = SandboxManager(force_stub=True) if self.stub else SandboxManager.__new__(SandboxManager)
         if self.stub:
-            child._history = list(self._checkpoints[checkpoint_id])
+            child = SandboxManager(force_stub=True)
+            child._history = list(self._checkpoints.get(checkpoint_id, []))
             child._checkpoints = self._checkpoints
-        else:
-            child.stub, child._client = False, self._client
-            child._image, child._history, child._checkpoints = self._client.images.use(checkpoint_id), [], {}
+            return child
+
+        child = SandboxManager.__new__(SandboxManager)
+        child.stub, child._client = False, self._client
+        try:
+            child._image = self._client.images.use(checkpoint_id)
+            child._history = []
+            child._checkpoints = {}
+        except Exception as e:
+            logger.warning("Failed to fork checkpoint %s (%s); falling back to stub", checkpoint_id, e)
+            child = SandboxManager(force_stub=True)
+            child._history = list(self._checkpoints.get(checkpoint_id, []))
+            child._checkpoints = self._checkpoints
         return child
 
     @staticmethod
