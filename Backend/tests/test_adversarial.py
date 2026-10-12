@@ -17,9 +17,9 @@ class AdversarialSandbox(SandboxManager):
     """Stub sandbox where the i-th patched candidate (in test order) follows plan[i].
 
     plan[i] = results of that candidate's successive test runs: [branch run,
-    stability x5, adversarial xm]. Only pytest executions consume a plan step;
-    file writes (cat/echo) are no-ops. Unplanned candidates fail; runs on an
-    unpatched history always fail.
+    stability x5, adversarial xm, full_suite]. Only pytest executions consume a
+    plan step; file writes (cat/echo) are no-ops. Unplanned candidates fail;
+    runs on an unpatched history always fail.
     """
 
     def __init__(self, plan: dict[int, list[bool]], _shared: dict | None = None):
@@ -116,6 +116,8 @@ async def _run(plan: dict[int, list[bool]], max_rounds: int = 2):
             content = "1. a\n2. b\n3. c\n4. d"
         elif job == "generate_adversarial_test":
             content = ADVERSARIAL_RESPONSE
+        elif job == "generate_confidence_report":
+            content = "### PatchTree Confidence Report\n\n**Verdict:** ok\n"
         else:
             content = "```diff\n--- a\n+++ b\n```"
         return {"content": content, "model": "stub", "tokens_in": 1, "tokens_out": 1, "stub": True}
@@ -130,28 +132,35 @@ async def _run(plan: dict[int, list[bool]], max_rounds: int = 2):
     return final, nodes, jobs
 
 
-def test_pipeline_clean_run_produces_12_nodes():
-    # Candidate 1: branch pass + 5 stability + 2 adversarial, all passing.
-    final, nodes, jobs = asyncio.run(_run({1: [T] * 8}))
+def test_pipeline_clean_run_produces_13_nodes():
+    # Candidate 1: branch pass + 5 stability + 2 adversarial + full suite, all passing.
+    final, nodes, jobs = asyncio.run(_run({1: [T] * 9}))
     assert final.status == "complete" and final.confidence_score == 1.0
     assert (final.adversarial_runs, final.adversarial_survived) == (2, 2)
-    assert len(nodes) == 12, f"expected 1 root + 4 search + 5 stability + 2 adversarial, got {len(nodes)}"
+    assert final.full_suite_result == "pass"
+    assert final.confidence_report is not None
+    assert len(nodes) == 13, f"expected 1 root + 4 search + 5 stability + 2 adversarial + 1 full_suite, got {len(nodes)}"
     assert nodes[0].branch_type == "root"
     assert [n.branch_type for n in nodes[1:5]] == ["search"] * 4
     assert [n.branch_type for n in nodes[5:10]] == ["stability"] * 5
     assert [n.branch_type for n in nodes[10:12]] == ["adversarial"] * 2
+    assert nodes[12].branch_type == "full_suite"
     assert jobs.count("generate_adversarial_test") == 2
+    assert jobs.count("generate_confidence_report") == 1
     adversarial = nodes[10:12]
     assert all(n.parent_node_id == final.winner_node_id for n in adversarial)
     assert all(n.test_result == "pass" for n in adversarial)
+    assert nodes[12].parent_node_id == final.winner_node_id
 
 
 def test_pipeline_partial_adversarial_survival():
-    # Candidate 0: branch pass + 5 stability + 2 adversarial; one attack breaks the patch.
-    final, nodes, jobs = asyncio.run(_run({0: [T] * 6 + [T, F]}))
+    # Candidate 0: branch + 5 stability + 2 adversarial + full suite; one attack breaks the patch.
+    final, nodes, jobs = asyncio.run(_run({0: [T] * 6 + [T, F, T]}))
     assert final.status == "complete" and final.winner_node_id is not None
     assert (final.adversarial_runs, final.adversarial_survived) == (2, 1)
-    assert final.confidence_score == 0.75, f"expected 0.5*1.0 + 0.5*0.5, got {final.confidence_score}"
+    assert final.full_suite_result == "pass"
+    # 0.4*1.0 + 0.4*0.5 + 0.2*1.0 = 0.8
+    assert final.confidence_score == 0.8, f"expected 0.4*1 + 0.4*0.5 + 0.2*1, got {final.confidence_score}"
     adversarial = [n for n in nodes if n.branch_type == "adversarial"]
     assert len(adversarial) == 2
     assert all(n.parent_node_id == final.winner_node_id for n in adversarial)
@@ -160,6 +169,6 @@ def test_pipeline_partial_adversarial_survival():
 if __name__ == "__main__":
     test_patch_survives_all_attacks()
     test_patch_broken_by_attack()
-    test_pipeline_clean_run_produces_12_nodes()
+    test_pipeline_clean_run_produces_13_nodes()
     test_pipeline_partial_adversarial_survival()
     print("OK")

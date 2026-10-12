@@ -182,9 +182,12 @@ async def test_run_pipeline_winner_round_1():
     assert final_run.winner_node_id is not None
     node_ids = {n.node_id for n in all_nodes}
     assert final_run.winner_node_id in node_ids, "winner not among created nodes"
-    assert len(all_nodes) == 12, f"expected root + 4 branches + 5 stability + 2 adversarial, got {len(all_nodes)}"
+    assert len(all_nodes) == 13, f"expected root + 4 + 5 stability + 2 adversarial + 1 full_suite, got {len(all_nodes)}"
     assert final_run.confidence_score == 1.0
+    assert final_run.full_suite_result == "pass"
+    assert final_run.confidence_report is not None
     assert all_nodes[0].branch_type == "root"
+    assert all_nodes[-1].branch_type == "full_suite"
     assert final_run.completed_at is not None
     print(f"winner in round 1: {final_run.winner_node_id}")
     print("test_run_pipeline_winner_round_1: all assertions passed")
@@ -222,7 +225,8 @@ async def test_run_pipeline_replans_and_wins_round_2():
     assert "replan_after_failure" in jobs_called, "replan was not invoked after round 1 failed"
     assert final_run.status == "complete", f"expected complete, got {final_run.status}"
     assert final_run.winner_node_id is not None
-    assert len(all_nodes) == 16, f"expected root + 4 + 4 + 5 stability + 2 adversarial nodes, got {len(all_nodes)}"
+    assert len(all_nodes) == 17, f"expected root + 4 + 4 + 5 stability + 2 adversarial + 1 full_suite, got {len(all_nodes)}"
+    assert final_run.confidence_report is not None
     print(f"winner in round 2 after replan: {final_run.winner_node_id}")
     print("test_run_pipeline_replans_and_wins_round_2: all assertions passed")
 
@@ -241,6 +245,7 @@ async def test_run_pipeline_honest_failure():
     assert final_run.status == "failed", f"expected failed, got {final_run.status}"
     assert final_run.winner_node_id is None
     assert len(all_nodes) == 9, f"expected root + 4 + 4 nodes, got {len(all_nodes)}"
+    assert final_run.confidence_report is not None
     assert final_run.completed_at is not None
     print(f"no winner after 2 rounds -> status: {final_run.status}, nodes: {len(all_nodes)}")
     print("test_run_pipeline_honest_failure: all assertions passed")

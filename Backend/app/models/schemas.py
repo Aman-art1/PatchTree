@@ -8,6 +8,7 @@ class RunCreate(BaseModel):
     repo_url: str
     bug_description: str
     target_test: str
+    full_suite_test: Optional[str] = "pytest"
 
 
 class Run(RunCreate):
@@ -17,6 +18,8 @@ class Run(RunCreate):
     confidence_score: Optional[float] = None
     adversarial_runs: int = 0
     adversarial_survived: int = 0
+    full_suite_result: Optional[Literal["pass", "fail", "error", "skipped"]] = None
+    confidence_report: Optional[str] = None
     total_cost_usd: float = 0.0
     total_wall_time_seconds: float = 0.0
     created_at: datetime
@@ -27,7 +30,7 @@ class Node(BaseModel):
     node_id: str
     run_id: str
     parent_node_id: Optional[str] = None
-    branch_type: Literal["root", "search", "stability", "adversarial"]
+    branch_type: Literal["root", "search", "stability", "adversarial", "full_suite"]
     checkpoint_id: Optional[str] = None
     hypothesis: Optional[str] = None
     patch_diff: Optional[str] = None

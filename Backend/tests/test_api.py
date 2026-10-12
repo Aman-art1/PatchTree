@@ -74,12 +74,12 @@ class APITests(unittest.TestCase):
             self.assertIsNone(tree[0]["parent_node_id"])
             search_ids = {node["node_id"] for node in tree if node["branch_type"] == "search"}
             for node in tree[1:]:
-                self.assertIn(node["branch_type"], ("search", "stability", "adversarial"))
+                self.assertIn(node["branch_type"], ("search", "stability", "adversarial", "full_suite"))
                 if node["branch_type"] == "search":
                     self.assertEqual(node["parent_node_id"], tree[0]["node_id"])
                 elif node["branch_type"] == "stability":
                     self.assertIn(node["parent_node_id"], search_ids)
-                elif node["branch_type"] == "adversarial":
+                elif node["branch_type"] in ("adversarial", "full_suite"):
                     self.assertEqual(node["parent_node_id"], final_run["winner_node_id"])
         return final_run, tree
 
@@ -104,7 +104,7 @@ class APITests(unittest.TestCase):
 
         final_run, tree = self.get_results(created["run_id"])
         self.assertEqual(final_run["status"], "complete")
-        self.assertEqual(len(tree), 12)
+        self.assertEqual(len(tree), 13)
         self.assertEqual(
             tree, [node.model_dump(mode="json") for node in captured_nodes]
         )
@@ -118,7 +118,12 @@ class APITests(unittest.TestCase):
         self.assertEqual(winner["stability_runs"], 5)
         self.assertEqual(final_run["adversarial_runs"], 2)
         self.assertEqual(final_run["adversarial_survived"], 2)
+        self.assertEqual(final_run["full_suite_result"], "pass")
         self.assertEqual(final_run["confidence_score"], 1.0)
+        self.assertIsNotNone(final_run["confidence_report"])
+        suite = [n for n in tree if n["branch_type"] == "full_suite"]
+        self.assertEqual(len(suite), 1)
+        self.assertEqual(suite[0]["parent_node_id"], final_run["winner_node_id"])
 
     def test_pipeline_failed_and_tree(self):
         with patch.object(pipeline, "SandboxManager", AlwaysFailingSandbox):
@@ -127,6 +132,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(final_run["status"], "failed")
         self.assertIsNone(final_run["winner_node_id"])
         self.assertEqual(len(tree), 9)
+        self.assertIsNotNone(final_run["confidence_report"])
         self.assertTrue(all(node["test_result"] == "fail" for node in tree))
 
     def test_pipeline_exception_marks_run_failed(self):
@@ -159,7 +165,8 @@ class APITests(unittest.TestCase):
         for created in (first, second):
             final_run, tree = self.get_results(created["run_id"])
             self.assertEqual(final_run["status"], "complete")
-            self.assertEqual(len(tree), 12)
+            self.assertEqual(len(tree), 13)
+            self.assertIsNotNone(final_run["confidence_report"])
 
     def test_missing_runs_return_404(self):
         for path in ("/runs/missing", "/runs/missing/tree"):

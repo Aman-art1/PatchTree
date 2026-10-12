@@ -66,7 +66,8 @@ T, F = True, False
 class ScriptedSandbox(SandboxManager):
     """Stub sandbox where the i-th patched candidate (in test order) follows plan[i].
 
-    plan[i] = results of that candidate's successive test runs: [branch run, stability x5, adversarial x2].
+    plan[i] = results of that candidate's successive test runs:
+    [branch run, stability x5, adversarial x2, full_suite].
     Unplanned candidates fail; the reproduce run (no patch applied) always fails.
     """
 
@@ -105,7 +106,14 @@ async def _run(plan: dict[int, list[bool]], max_rounds: int = 2):
 
     async def fake_call_model(job, prompt, system_prompt=None, temperature=0.3):
         jobs.append(job)
-        content = "1. a\n2. b\n3. c\n4. d" if job == "replan_after_failure" else "```diff\n--- a\n+++ b\n```"
+        if job == "replan_after_failure":
+            content = "1. a\n2. b\n3. c\n4. d"
+        elif job == "generate_adversarial_test":
+            content = "```python\ndef test_adversarial_edge_case():\n    assert True\n```"
+        elif job == "generate_confidence_report":
+            content = "### PatchTree Confidence Report\n\n**Verdict:** ok\n"
+        else:
+            content = "```diff\n--- a\n+++ b\n```"
         return {"content": content, "model": "stub", "tokens_in": 1, "tokens_out": 1, "stub": True}
 
     run = Run(run_id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc),
@@ -123,36 +131,38 @@ def _search(nodes: list[Node]) -> list[Node]:
 
 
 def test_pipeline_promotes_stable_winner():
-    final, nodes, jobs = asyncio.run(_run({1: [T] * 8}))
+    final, nodes, jobs = asyncio.run(_run({1: [T] * 9}))
     winner = _search(nodes)[1]
     assert final.status == "complete" and final.winner_node_id == winner.node_id
     assert final.confidence_score == 1.0 and winner.is_stable
     assert (final.adversarial_runs, final.adversarial_survived) == (2, 2)
-    assert len(nodes) == 1 + 4 + 5 + 2 and "replan_after_failure" not in jobs
+    assert final.full_suite_result == "pass" and final.confidence_report is not None
+    assert len(nodes) == 1 + 4 + 5 + 2 + 1 and "replan_after_failure" not in jobs
 
 
 def test_pipeline_falls_back_to_second_candidate():
-    final, nodes, jobs = asyncio.run(_run({0: [T, T, T, F, T, T], 1: [T] * 8}))
+    final, nodes, jobs = asyncio.run(_run({0: [T, T, T, F, T, T], 1: [T] * 9}))
     first, second = _search(nodes)[:2]
     assert first.is_stable is False and first.stability_passes == 5 - 1
     assert final.winner_node_id == second.node_id and final.confidence_score == 1.0
-    assert len(nodes) == 1 + 4 + 5 + 5 + 2 and "replan_after_failure" not in jobs
+    assert len(nodes) == 1 + 4 + 5 + 5 + 2 + 1 and "replan_after_failure" not in jobs
 
 
 def test_pipeline_replans_when_all_candidates_flaky():
     flaky = [T, T, F, T, T, T]
-    final, nodes, jobs = asyncio.run(_run({0: flaky, 1: flaky, 4: [T] * 8}))
+    final, nodes, jobs = asyncio.run(_run({0: flaky, 1: flaky, 4: [T] * 9}))
     r1, r2 = _search(nodes)[:4], _search(nodes)[4:]
     assert r1[0].is_stable is False and r1[1].is_stable is False
     assert jobs.count("replan_after_failure") == 1
     assert final.status == "complete" and final.winner_node_id == r2[0].node_id
-    assert len(nodes) == 1 + 4 + 5 + 5 + 4 + 5 + 2
+    assert len(nodes) == 1 + 4 + 5 + 5 + 4 + 5 + 2 + 1
 
 
 def test_pipeline_fails_when_always_flaky():
     flaky = [T, F, F, F, F, F]
     final, nodes, jobs = asyncio.run(_run({i: flaky for i in range(8)}))
     assert final.status == "failed" and final.winner_node_id is None
+    assert final.confidence_report is not None
     assert all(n.is_stable is False for n in nodes if n.branch_type == "search" and n.test_result == "pass")
 
 

@@ -418,6 +418,62 @@ async def check_adversarial(
     return nodes
 
 
+async def run_full_suite(
+    run: Run,
+    candidate: Node,
+    sandbox: SandboxManager,
+) -> Node:
+    """Runs the full repository test suite on the winning candidate checkpoint."""
+    cmd = run.full_suite_test or "pytest"
+    fork = sandbox.fork(candidate.checkpoint_id)
+    result = await asyncio.to_thread(fork.run_command, cmd)
+    passed = result.exit_code == 0
+    run.full_suite_result = "pass" if passed else "fail"
+    return Node(
+        node_id=str(uuid.uuid4()),
+        run_id=run.run_id,
+        parent_node_id=candidate.node_id,
+        branch_type="full_suite",
+        checkpoint_id=fork.checkpoint(),
+        test_command=cmd,
+        test_result="pass" if passed else "fail",
+        test_output=result.output,
+        status="done",
+    )
+
+
+async def generate_confidence_report(
+    run: Run,
+    winner: Node | None,
+    all_nodes: list[Node],
+) -> str:
+    """Calls Nemotron Ultra to generate a structured plain-language confidence report."""
+    if winner is not None:
+        prompt = (
+            f"You are the PatchTree Verification Agent. Synthesize a plain-language confidence report:\n"
+            f"Bug Description: {run.bug_description}\n"
+            f"Target Test: {run.target_test}\n"
+            f"Patch Diff:\n{winner.patch_diff}\n\n"
+            f"Telemetry:\n"
+            f"- Stability Forensics: {winner.stability_passes}/{winner.stability_runs} passes\n"
+            f"- Adversarial Attacks: {run.adversarial_survived}/{run.adversarial_runs} survived\n"
+            f"- Full Suite Result: {run.full_suite_result}\n"
+            f"- Overall Confidence Score: {run.confidence_score}\n"
+            f"- Total Wall Time: {run.total_wall_time_seconds}s, Total Cost: ${run.total_cost_usd}\n\n"
+            f"Provide an Executive Summary, Layer-by-Layer Verification Breakdown, and Production Readiness Recommendation in GitHub Markdown."
+        )
+    else:
+        prompt = (
+            f"You are the PatchTree Verification Agent. Synthesize an Honest Failure Report:\n"
+            f"Bug Description: {run.bug_description}\n"
+            f"Target Test: {run.target_test}\n"
+            f"No candidate patch passed verification across search rounds.\n"
+            f"Summarize what failed, identify the least-bad attempt from the tree, and provide actionable next steps for the engineering team."
+        )
+    res = await call_model("generate_confidence_report", prompt=prompt)
+    return res["content"]
+
+
 async def run_pipeline(
     run: Run,
     max_rounds: int = 2,
@@ -465,30 +521,41 @@ async def run_pipeline(
             )
 
         if winner is not None:
+            # 1. Adversarial verification
             logger.info(f"Running adversarial verification on winner {winner.node_id} (m=2)...")
             adversarial_nodes = await check_adversarial(run, winner, sandbox=sandbox, m=2)
             all_nodes.extend(adversarial_nodes)
+            # 2. Full-suite check
+            logger.info(f"Running full suite check on winner {winner.node_id}...")
+            suite_node = await run_full_suite(run, winner, sandbox=sandbox)
+            all_nodes.append(suite_node)
+            # 3. Confidence score calculation
+            stability_rate = (winner.stability_passes / winner.stability_runs) if winner.stability_runs else 1.0
+            adversarial_rate = (run.adversarial_survived / run.adversarial_runs) if run.adversarial_runs else 1.0
+            suite_rate = 1.0 if run.full_suite_result == "pass" else 0.0
+            run.confidence_score = round(0.4 * stability_rate + 0.4 * adversarial_rate + 0.2 * suite_rate, 2)
             run.status = "complete"
             run.winner_node_id = winner.node_id
-            # Confidence combines stability pass rate and adversarial survival rate.
-            stability_rate = winner.stability_passes / winner.stability_runs if winner.stability_runs else 1.0
-            adversarial_rate = run.adversarial_survived / run.adversarial_runs if run.adversarial_runs else 1.0
-            run.confidence_score = round(0.5 * stability_rate + 0.5 * adversarial_rate, 2)
             run.completed_at = datetime.now(timezone.utc)
             if run.created_at:
                 run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
             run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
-            logger.info(f"Pipeline complete: verified stable winner {winner.node_id} in round {round_num}")
+            # 4. Ultra Report generation
+            logger.info("Generating Nemotron Ultra Confidence Report...")
+            run.confidence_report = await generate_confidence_report(run, winner, all_nodes)
+            logger.info(f"Pipeline complete: verified winner {winner.node_id} with confidence {run.confidence_score}")
             return run, all_nodes
 
         if round_num < max_rounds:
             logger.info(f"Round {round_num}: no stable winner found; replanning with Nemotron Ultra")
             guidance = await replan(run, list(branches))
 
+    # If all rounds failed:
     run.status = "failed"
     run.completed_at = datetime.now(timezone.utc)
     if run.created_at:
         run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
     run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
+    run.confidence_report = await generate_confidence_report(run, None, all_nodes)
     logger.info(f"Pipeline failed: no passing patch after {max_rounds} rounds")
     return run, all_nodes
