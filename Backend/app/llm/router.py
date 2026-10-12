@@ -32,6 +32,7 @@ ROUTES = {
     "generate_patch_root_cause": ("super", 0.6),
     "generate_patch_test_driven": ("nano", 0.2),
     "replan_after_failure": ("ultra", 0.3),
+    "generate_adversarial_test": ("super", 0.6),
 }
 
 
@@ -81,6 +82,20 @@ async def call_model(job: str, prompt: str, system_prompt: str | None = None, te
             "model": f"stub/{model}",
             "tokens_in": len(prompt.split()),
             "tokens_out": 40,
+            "stub": True,
+        }
+
+    if job == "generate_adversarial_test":
+        return {
+            "content": (
+                "```python\n"
+                "def test_adversarial_edge_case():\n"
+                "    assert True\n"
+                "```"
+            ),
+            "model": f"stub/{model}",
+            "tokens_in": len(prompt.split()),
+            "tokens_out": 25,
             "stub": True,
         }
 

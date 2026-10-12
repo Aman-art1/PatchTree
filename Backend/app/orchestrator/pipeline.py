@@ -8,7 +8,7 @@ from typing import Literal
 
 from ..llm.router import call_model
 from ..models.schemas import Node, Run
-from ..sandbox.contree_client import SandboxManager
+from ..sandbox.contree_client import CommandResult, SandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,15 @@ REPLAN_SYSTEM_PROMPT = (
     "Analyze the failures and reply with exactly 4 revised strategies for the next round, "
     "as numbered lines 1-4, one concise sentence each."
 )
+
+ADVERSARIAL_SYSTEM_PROMPT = (
+    "You are an adversarial tester. Given a bug description, the target test, and a "
+    "candidate patch, write one pytest test function designed to break the patch: probe "
+    "edge cases, boundary values, and regressions the patch may have missed. "
+    "Reply with only a python code block containing the test."
+)
+
+ADVERSARIAL_TEST_FILENAME = "test_adversarial_check.py"
 
 
 def reproduce(run: Run, sandbox: SandboxManager) -> Node:
@@ -150,6 +159,14 @@ async def replan(run: Run, failed_branches: list[Node]) -> list[str]:
 def extract_diff(content: str) -> str:
     """Extract unified diff from model response, stripping markdown fences if present."""
     match = re.search(r"```(?:diff|patch)?\s*\n([\s\S]*?)\n```", content)
+    if match:
+        return match.group(1).strip()
+    return content.strip()
+
+
+def extract_code(content: str) -> str:
+    """Extract a python code block from a model response, stripping markdown fences."""
+    match = re.search(r"```(?:python|py)?\s*\n([\s\S]*?)\n```", content)
     if match:
         return match.group(1).strip()
     return content.strip()
@@ -325,6 +342,82 @@ async def check_stability(
     return nodes
 
 
+async def check_adversarial(
+    run: Run,
+    candidate: Node,
+    sandbox: SandboxManager,
+    m: int = 2,
+) -> list[Node]:
+    """
+    Adversarial verification: fork the candidate checkpoint m times and, in each fork,
+    write and run a freshly generated adversarial pytest designed to break the patch.
+
+    test_result="pass" means the patch survived the attack; "fail" means the attack
+    exposed a flaw. Sets run.adversarial_runs and run.adversarial_survived.
+
+    Args:
+        run: The Run being repaired.
+        candidate: The stability-verified winner Node.
+        sandbox: Sandbox used to fork the candidate checkpoint.
+        m: Number of concurrent adversarial forks (default 2).
+
+    Returns:
+        One "adversarial" Node per fork.
+    """
+    prompt = (
+        f"Bug description: {run.bug_description}\n"
+        f"Target test command: {candidate.test_command or run.target_test}\n\n"
+        f"Candidate patch under attack:\n{candidate.patch_diff or ''}\n\n"
+        f"Write one pytest test function to save as {ADVERSARIAL_TEST_FILENAME} that tries "
+        "to break this patch: edge cases, boundary inputs, and regressions it may miss."
+    )
+    test_command = f"pytest {ADVERSARIAL_TEST_FILENAME}"
+
+    async def _one(index: int) -> Node:
+        response = await call_model(
+            job="generate_adversarial_test",
+            prompt=prompt,
+            system_prompt=ADVERSARIAL_SYSTEM_PROMPT,
+        )
+        test_code = extract_code(response["content"])
+
+        def _exec() -> tuple[CommandResult, str]:
+            fork = sandbox.fork(candidate.checkpoint_id)
+            write = fork.run_command(
+                f"cat > {ADVERSARIAL_TEST_FILENAME} << 'PATCHTREE_EOF'\n"
+                f"{test_code}\nPATCHTREE_EOF"
+            )
+            logger.debug(f"Adversarial fork {index + 1}: write exit_code={write.exit_code}")
+            result = fork.run_command(test_command)
+            return result, fork.checkpoint()
+
+        result, checkpoint_id = await asyncio.to_thread(_exec)
+        return Node(
+            node_id=str(uuid.uuid4()),
+            run_id=run.run_id,
+            parent_node_id=candidate.node_id,
+            branch_type="adversarial",
+            checkpoint_id=checkpoint_id,
+            hypothesis=f"adversarial fork {index + 1}: {test_code.splitlines()[0] if test_code else 'empty'}",
+            test_command=test_command,
+            test_result="pass" if result.exit_code == 0 else "fail",
+            test_output=result.output,
+            model_used=response["model"],
+            tokens_in=response["tokens_in"],
+            tokens_out=response["tokens_out"],
+            status="done",
+        )
+
+    nodes = list(await asyncio.gather(*(_one(i) for i in range(m))))
+    run.adversarial_runs = m
+    run.adversarial_survived = sum(n.test_result == "pass" for n in nodes)
+    logger.info(
+        f"Adversarial: patch {candidate.node_id} survived "
+        f"{run.adversarial_survived}/{m} attacks"
+    )
+    return nodes
+
+
 async def run_pipeline(
     run: Run,
     max_rounds: int = 2,
@@ -372,9 +465,15 @@ async def run_pipeline(
             )
 
         if winner is not None:
+            logger.info(f"Running adversarial verification on winner {winner.node_id} (m=2)...")
+            adversarial_nodes = await check_adversarial(run, winner, sandbox=sandbox, m=2)
+            all_nodes.extend(adversarial_nodes)
             run.status = "complete"
             run.winner_node_id = winner.node_id
-            run.confidence_score = round(winner.stability_passes / winner.stability_runs, 2)
+            # Confidence combines stability pass rate and adversarial survival rate.
+            stability_rate = winner.stability_passes / winner.stability_runs if winner.stability_runs else 1.0
+            adversarial_rate = run.adversarial_survived / run.adversarial_runs if run.adversarial_runs else 1.0
+            run.confidence_score = round(0.5 * stability_rate + 0.5 * adversarial_rate, 2)
             run.completed_at = datetime.now(timezone.utc)
             if run.created_at:
                 run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)

@@ -15,6 +15,8 @@ class Run(RunCreate):
     status: str = "pending"
     winner_node_id: Optional[str] = None
     confidence_score: Optional[float] = None
+    adversarial_runs: int = 0
+    adversarial_survived: int = 0
     total_cost_usd: float = 0.0
     total_wall_time_seconds: float = 0.0
     created_at: datetime

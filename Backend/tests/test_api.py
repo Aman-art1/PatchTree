@@ -74,11 +74,13 @@ class APITests(unittest.TestCase):
             self.assertIsNone(tree[0]["parent_node_id"])
             search_ids = {node["node_id"] for node in tree if node["branch_type"] == "search"}
             for node in tree[1:]:
-                self.assertIn(node["branch_type"], ("search", "stability"))
+                self.assertIn(node["branch_type"], ("search", "stability", "adversarial"))
                 if node["branch_type"] == "search":
                     self.assertEqual(node["parent_node_id"], tree[0]["node_id"])
                 elif node["branch_type"] == "stability":
                     self.assertIn(node["parent_node_id"], search_ids)
+                elif node["branch_type"] == "adversarial":
+                    self.assertEqual(node["parent_node_id"], final_run["winner_node_id"])
         return final_run, tree
 
     def test_health(self):
@@ -102,7 +104,7 @@ class APITests(unittest.TestCase):
 
         final_run, tree = self.get_results(created["run_id"])
         self.assertEqual(final_run["status"], "complete")
-        self.assertEqual(len(tree), 10)
+        self.assertEqual(len(tree), 12)
         self.assertEqual(
             tree, [node.model_dump(mode="json") for node in captured_nodes]
         )
@@ -114,6 +116,9 @@ class APITests(unittest.TestCase):
         self.assertTrue(winner["is_stable"])
         self.assertEqual(winner["stability_passes"], 5)
         self.assertEqual(winner["stability_runs"], 5)
+        self.assertEqual(final_run["adversarial_runs"], 2)
+        self.assertEqual(final_run["adversarial_survived"], 2)
+        self.assertEqual(final_run["confidence_score"], 1.0)
 
     def test_pipeline_failed_and_tree(self):
         with patch.object(pipeline, "SandboxManager", AlwaysFailingSandbox):
@@ -154,7 +159,7 @@ class APITests(unittest.TestCase):
         for created in (first, second):
             final_run, tree = self.get_results(created["run_id"])
             self.assertEqual(final_run["status"], "complete")
-            self.assertEqual(len(tree), 10)
+            self.assertEqual(len(tree), 12)
 
     def test_missing_runs_return_404(self):
         for path in ("/runs/missing", "/runs/missing/tree"):
@@ -197,4 +202,3 @@ class APITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-    
