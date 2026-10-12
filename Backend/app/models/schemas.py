@@ -36,3 +36,6 @@ class Node(BaseModel):
     tokens_in: int = 0
     tokens_out: int = 0
     status: str = "pending"
+    is_stable: Optional[bool] = None
+    stability_runs: int = 0
+    stability_passes: int = 0

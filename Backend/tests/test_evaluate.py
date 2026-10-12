@@ -182,7 +182,8 @@ async def test_run_pipeline_winner_round_1():
     assert final_run.winner_node_id is not None
     node_ids = {n.node_id for n in all_nodes}
     assert final_run.winner_node_id in node_ids, "winner not among created nodes"
-    assert len(all_nodes) == 5, f"expected root + 4 branches, got {len(all_nodes)}"
+    assert len(all_nodes) == 10, f"expected root + 4 branches + 5 stability, got {len(all_nodes)}"
+    assert final_run.confidence_score == 1.0
     assert all_nodes[0].branch_type == "root"
     assert final_run.completed_at is not None
     print(f"winner in round 1: {final_run.winner_node_id}")
@@ -221,7 +222,7 @@ async def test_run_pipeline_replans_and_wins_round_2():
     assert "replan_after_failure" in jobs_called, "replan was not invoked after round 1 failed"
     assert final_run.status == "complete", f"expected complete, got {final_run.status}"
     assert final_run.winner_node_id is not None
-    assert len(all_nodes) == 9, f"expected root + 4 + 4 nodes, got {len(all_nodes)}"
+    assert len(all_nodes) == 14, f"expected root + 4 + 4 + 5 stability nodes, got {len(all_nodes)}"
     print(f"winner in round 2 after replan: {final_run.winner_node_id}")
     print("test_run_pipeline_replans_and_wins_round_2: all assertions passed")
 

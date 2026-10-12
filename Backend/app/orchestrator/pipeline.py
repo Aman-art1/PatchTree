@@ -281,6 +281,50 @@ async def search_round(
     return list(nodes)
 
 
+async def check_stability(
+    run: Run,
+    candidate: Node,
+    sandbox: SandboxManager,
+    k: int = 5,
+) -> list[Node]:
+    """
+    Flaky-test forensics: fork the candidate's checkpoint k times and re-run the test in each fork.
+
+    Args:
+        run: The Run being repaired.
+        candidate: A Node whose test passed once; updated in place with is_stable,
+            stability_runs and stability_passes (stable only if every fork passes).
+        sandbox: Sandbox used to fork the candidate checkpoint.
+        k: Number of concurrent forks (default 5).
+
+    Returns:
+        One "stability" Node per fork.
+    """
+    cmd = candidate.test_command or run.target_test
+
+    def _one() -> Node:
+        fork = sandbox.fork(candidate.checkpoint_id)
+        result = fork.run_command(cmd)
+        return Node(
+            node_id=str(uuid.uuid4()),
+            run_id=run.run_id,
+            parent_node_id=candidate.node_id,
+            branch_type="stability",
+            checkpoint_id=fork.checkpoint(),
+            test_command=cmd,
+            test_result="pass" if result.exit_code == 0 else "fail",
+            test_output=result.output,
+            status="done",
+        )
+
+    nodes = list(await asyncio.gather(*(asyncio.to_thread(_one) for _ in range(k))))
+    candidate.stability_runs = k
+    candidate.stability_passes = sum(n.test_result == "pass" for n in nodes)
+    candidate.is_stable = candidate.stability_passes == k
+    logger.info(f"Stability: node {candidate.node_id} passed {candidate.stability_passes}/{k}")
+    return nodes
+
+
 async def run_pipeline(
     run: Run,
     max_rounds: int = 2,
@@ -312,19 +356,34 @@ async def run_pipeline(
         branches = await search_round(run, root_node, round_num=round_num, guidance=guidance, sandbox=sandbox)
         all_nodes.extend(branches)
 
-        winner = evaluate_search(branches)
+        winner: Node | None = None
+        for candidate in (b for b in branches if b.test_result == "pass"):
+            logger.info(f"Running stability check on candidate {candidate.node_id} (k=5)...")
+            stability_nodes = await check_stability(run, candidate, sandbox=sandbox, k=5)
+            all_nodes.extend(stability_nodes)
+
+            if candidate.is_stable:
+                winner = candidate
+                logger.info(f"Candidate {candidate.node_id} verified stable ({candidate.stability_passes}/{candidate.stability_runs})!")
+                break
+            logger.warning(
+                f"Candidate {candidate.node_id} demoted due to flakiness "
+                f"({candidate.stability_passes}/{candidate.stability_runs} passes)."
+            )
+
         if winner is not None:
             run.status = "complete"
             run.winner_node_id = winner.node_id
+            run.confidence_score = round(winner.stability_passes / winner.stability_runs, 2)
             run.completed_at = datetime.now(timezone.utc)
             if run.created_at:
                 run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
             run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
-            logger.info(f"Pipeline complete: winner {winner.node_id} in round {round_num}")
+            logger.info(f"Pipeline complete: verified stable winner {winner.node_id} in round {round_num}")
             return run, all_nodes
 
         if round_num < max_rounds:
-            logger.info(f"Round {round_num}: no winner; replanning")
+            logger.info(f"Round {round_num}: no stable winner found; replanning with Nemotron Ultra")
             guidance = await replan(run, list(branches))
 
     run.status = "failed"

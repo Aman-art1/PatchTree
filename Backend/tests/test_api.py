@@ -72,9 +72,13 @@ class APITests(unittest.TestCase):
         if tree:
             self.assertEqual(tree[0]["branch_type"], "root")
             self.assertIsNone(tree[0]["parent_node_id"])
+            search_ids = {node["node_id"] for node in tree if node["branch_type"] == "search"}
             for node in tree[1:]:
-                self.assertEqual(node["branch_type"], "search")
-                self.assertEqual(node["parent_node_id"], tree[0]["node_id"])
+                self.assertIn(node["branch_type"], ("search", "stability"))
+                if node["branch_type"] == "search":
+                    self.assertEqual(node["parent_node_id"], tree[0]["node_id"])
+                elif node["branch_type"] == "stability":
+                    self.assertIn(node["parent_node_id"], search_ids)
         return final_run, tree
 
     def test_health(self):
@@ -98,7 +102,7 @@ class APITests(unittest.TestCase):
 
         final_run, tree = self.get_results(created["run_id"])
         self.assertEqual(final_run["status"], "complete")
-        self.assertEqual(len(tree), 5)
+        self.assertEqual(len(tree), 10)
         self.assertEqual(
             tree, [node.model_dump(mode="json") for node in captured_nodes]
         )
@@ -107,6 +111,9 @@ class APITests(unittest.TestCase):
         )
         self.assertEqual(winner["test_result"], "pass")
         self.assertEqual(winner["branch_type"], "search")
+        self.assertTrue(winner["is_stable"])
+        self.assertEqual(winner["stability_passes"], 5)
+        self.assertEqual(winner["stability_runs"], 5)
 
     def test_pipeline_failed_and_tree(self):
         with patch.object(pipeline, "SandboxManager", AlwaysFailingSandbox):
@@ -147,7 +154,7 @@ class APITests(unittest.TestCase):
         for created in (first, second):
             final_run, tree = self.get_results(created["run_id"])
             self.assertEqual(final_run["status"], "complete")
-            self.assertEqual(len(tree), 5)
+            self.assertEqual(len(tree), 10)
 
     def test_missing_runs_return_404(self):
         for path in ("/runs/missing", "/runs/missing/tree"):
@@ -190,3 +197,4 @@ class APITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+    
