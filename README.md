@@ -1,4 +1,4 @@
-# 🌳 PatchTree
+# PatchTree
 
 > **Autonomous AI agent that forks cloud sandboxes to explore, verify, and stress-test code patches before trusting them.**  
 > *Built for the Nebius Token Factory x NVIDIA Global AI Hackathon (Coding & Agentic Engineering Track).*
@@ -31,7 +31,7 @@ In production software, that is a coin flip dressed up as software engineering:
 | **Sandbox Isolation** | Reuses dirty container state | **Contree Snapshot Checkpointing & Clean Forking** |
 | **Flakiness Handling** | Assumes 1 green run = permanent fix | **5-Fork Stability Forensics** to verify true stability |
 | **Adversarial Hardening** | None (stops at first pass) | **Attack Forks** where a secondary model tries to break the patch |
-| **Recovery on Failure** | Blind prompt retry | **Nemotron Ultra Meta-Replan** analyzing failure traces |
+| **Recovery on Failure** | Blind prompt retry | **Nemotron Ultra Direct Escalation**: 550B flagship directly synthesizes the fix from failure traces |
 | **Final Output** | Unverified diff | **Diff + Decision-Ready Confidence Report + Execution Tree** |
 
 ---
@@ -45,10 +45,11 @@ flowchart LR
     A["1. Reproduce<br/>& Checkpoint A"] --> B["2. 4-Branch<br/>Concurrent Search"]
     B --> C{"3. Candidate<br/>Passed?"}
     C -->|Yes| D["4. Stability Forensics<br/>(5 Parallel Forks)"]
-    C -->|All Fail| E["5. Ultra Replan<br/>(Analyze Traces)"]
-    E --> B
+    C -->|All Fail| E["5. Ultra Escalation<br/>(Direct Code Synthesis)"]
+    E -->|Passes| D
+    E -->|Fails| J["Honest Failure Report<br/>(0% Confidence)"]
     D -->|5/5 Stable| G["6. Adversarial Attacks<br/>(2 Attack Tests)"]
-    D -->|Flaky| E
+    D -->|Flaky| J
     G --> H["7. Full-Suite Check<br/>(Zero Regressions)"]
     H --> I["8. Verified Patch<br/>+ Ultra Confidence Report"]
 ```
@@ -67,9 +68,9 @@ flowchart LR
    Nemotron Super (120B) inspects the patch diff and generates $m=2$ targeted attack test functions probing edge cases, boundary conditions, and floating-point quirks to verify the fix is not narrow.
 5. **Full-Suite Regression Verification**  
    Runs the entire repository test suite (`pytest`) on the winning candidate checkpoint to guarantee zero regressions.
-6. **Ultra-Tier Confidence Reporting & Meta-Replan**  
+6. **Ultra-Tier Confidence Reporting & Direct Escalation**  
    - **If successful:** Nemotron Ultra (550B) synthesizes all telemetry (stability pass rate, attack survival, regression result, cost, and wall time) into an executive confidence report.
-   - **If all branches fail:** Nemotron Ultra diagnoses failure traces and synthesizes revised strategies for Round 2 (max 2 rounds), or generates an honest failure report.
+   - **If all branches fail:** Nemotron Ultra steps in directly. It ingests the complete failure context (hypotheses, patch diffs, and exact pytest traces from all 4 branches) and synthesizes a direct code patch (`generate_patch_ultra`). If Ultra's patch passes, it proceeds through stability and adversarial checks; if it fails, it generates an honest failure report.
 
 ---
 
@@ -88,31 +89,31 @@ flowchart TD
         B4["Branch 4: Test-Driven Fix<br/>(Nemotron Nano)"]
     end
 
-    subgraph Stability ["3. Flaky-Test Forensics"]
+    subgraph Escalation ["3. Ultra Direct Escalation"]
+        UltraNode["⚡ Ultra Synthesis Node<br/>(Nemotron Ultra directly writes patch)"]
+    end
+
+    subgraph Stability ["4. Flaky-Test Forensics"]
         Stab["🛡️ Stability Forensics<br/>5 Parallel Forks (5/5 required)"]
     end
 
-    subgraph Adversarial ["4. Adversarial & Full-Suite"]
+    subgraph Adversarial ["5. Adversarial & Full-Suite"]
         Adv["⚔️ Adversarial Attacks<br/>2 Attack Tests (Nemotron Super)"]
         Suite["🧪 Full Test Suite<br/>Zero Regressions Check"]
     end
 
-    subgraph ReplanLoop ["Recovery Loop"]
-        Replan["🧠 Meta-Replan<br/>(Nemotron Ultra diagnoses traces)"]
-    end
-
-    subgraph Verified ["5. Trust Report"]
+    subgraph Verified ["6. Trust Report"]
         Winner["✅ Verified Stable Patch<br/>Confidence Report + Diff"]
     end
 
     Root -->|Fork A| B1 & B2 & B3 & B4
     B1 & B2 & B3 & B4 -->|Passing Candidate| Stab
-    B1 & B2 & B3 & B4 -->|All Fail| Replan
-    Replan -->|Revised Strategies| Search
+    B1 & B2 & B3 & B4 -->|All 4 Fail| UltraNode
+    UltraNode -->|Passes Test| Stab
     Stab -->|5/5 Stable Winner| Adv
-    Stab -->|Flaky Failure| Replan
     Adv -->|Attack Tests| Suite
     Suite --> Winner
+```
 
 ---
 
