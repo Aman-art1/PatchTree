@@ -94,14 +94,15 @@ class APITests(unittest.TestCase):
     def test_pipeline_complete_and_tree(self):
         captured_nodes = []
 
-        async def capture_pipeline(run):
-            final_run, created_nodes = await pipeline.run_pipeline(run)
+        async def capture_pipeline(run, *args, **kwargs):
+            final_run, created_nodes = await pipeline.run_pipeline(run, *args, **kwargs)
             captured_nodes.extend(created_nodes)
             return final_run, created_nodes
 
         with patch.object(main, "run_pipeline", side_effect=capture_pipeline) as task:
             created = self.create_run()
-            task.assert_awaited_once_with(main.runs[created["run_id"]])
+            self.assertEqual(task.await_count, 1)
+            self.assertEqual(task.call_args[0][0], main.runs[created["run_id"]])
 
         final_run, tree = self.get_results(created["run_id"])
         self.assertEqual(final_run["status"], "complete")

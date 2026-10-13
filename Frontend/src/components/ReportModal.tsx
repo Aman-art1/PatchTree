@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { X, Shield, Clock, DollarSign, Percent } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { Run } from '../types';
+import { getRun } from '../api';
 
 interface Props {
   run: Run;
@@ -33,8 +35,18 @@ function ScoreGauge({ score }: { score: number }) {
   );
 }
 
-export default function ReportModal({ run, onClose }: Props) {
-  const score = (run.confidence_score ?? 0) >= 1 ? run.confidence_score! : (run.confidence_score ?? 0) * 100;
+export default function ReportModal({ run: initialRun, onClose }: Props) {
+  const [run, setRun] = useState<Run>(initialRun);
+
+  useEffect(() => {
+    if (!run.confidence_report && run.run_id && !run.run_id.startsWith('mock-')) {
+      getRun(run.run_id).then((fresh) => {
+        if (fresh && fresh.confidence_report) setRun(fresh);
+      }).catch(() => {});
+    }
+  }, [run.run_id, run.confidence_report]);
+
+  const score = Math.round((run.confidence_score ?? 0) * 100);
 
   return (
     <div className="modal-overlay" onClick={onClose}>

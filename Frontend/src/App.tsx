@@ -231,13 +231,16 @@ export default function App() {
               <div className="telemetry__item"><Clock size={13} /><span>{run.total_wall_time_seconds.toFixed(1)}s</span></div>
             )}
             {run.confidence_score != null && (
-              <div className="telemetry__item telemetry__item--highlight"><Percent size={13} /><span>{run.confidence_score}%</span></div>
+              <div className="telemetry__item telemetry__item--highlight">
+                <Percent size={13} />
+                <span>{Math.round((run.confidence_score ?? 0) * 100)}%</span>
+              </div>
             )}
           </div>
         )}
 
         <div className="topbar__controls">
-          {run?.confidence_report && (
+          {(run?.confidence_report || run?.status === 'complete' || run?.status === 'failed') && (
             <button className="btn btn--ghost" onClick={() => setShowReport(true)}>
               <Shield size={14} /> View Report
             </button>

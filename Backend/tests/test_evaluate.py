@@ -252,10 +252,14 @@ async def test_run_pipeline_honest_failure():
     print("test_run_pipeline_honest_failure: all assertions passed")
 
 
-if __name__ == "__main__":
+async def _main():
     test_evaluate_search()
-    asyncio.run(test_replan())
-    asyncio.run(test_run_pipeline_winner_round_1())
-    asyncio.run(test_run_pipeline_replans_and_wins_round_2())
-    asyncio.run(test_run_pipeline_honest_failure())
+    await test_replan()
+    await test_run_pipeline_winner_round_1()
+    await test_run_pipeline_replans_and_wins_round_2()
+    await test_run_pipeline_honest_failure()
     print("\nAll evaluate/replan tests passed!")
+
+
+if __name__ == "__main__":
+    asyncio.run(_main())

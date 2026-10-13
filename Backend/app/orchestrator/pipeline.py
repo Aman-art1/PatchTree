@@ -1,6 +1,7 @@
 """SearchNode fan-out, evaluation, replan, and pipeline orchestration."""
 import asyncio
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -482,6 +483,7 @@ async def run_pipeline(
     run: Run,
     max_rounds: int = 2,
     sandbox: SandboxManager | None = None,
+    live_nodes: list[Node] | None = None,
 ) -> tuple[Run, list[Node]]:
     """
     End-to-end patch search state machine:
@@ -491,13 +493,18 @@ async def run_pipeline(
         run: The Run to process.
         max_rounds: Maximum number of search rounds before giving up.
         sandbox: Optional sandbox instance (defaults to SandboxManager()).
+        live_nodes: Optional mutable list that receives nodes in real-time.
 
     Returns:
         (updated_run, all_nodes_created). On success run.status is "complete"
         and run.winner_node_id is set; otherwise run.status is "failed".
     """
-    sandbox = sandbox or SandboxManager()
-    all_nodes: list[Node] = []
+    force_stub = bool(
+        os.environ.get("PATCHTREE_FORCE_STUB", "").lower() in ("1", "true")
+        or "example" in (run.repo_url or "").lower()
+    )
+    sandbox = sandbox or SandboxManager(force_stub=force_stub)
+    all_nodes: list[Node] = live_nodes if live_nodes is not None else []
     run.status = "running"
 
     root_node = reproduce(run, sandbox)
@@ -547,7 +554,6 @@ async def run_pipeline(
             else:
                 suite_rate = 1.0 if run.full_suite_result == "pass" else 0.0
                 run.confidence_score = round(0.4 * stability_rate + 0.4 * adversarial_rate + 0.2 * suite_rate, 2)
-            run.status = "complete"
             run.winner_node_id = winner.node_id
             run.completed_at = datetime.now(timezone.utc)
             if run.created_at:
@@ -556,6 +562,7 @@ async def run_pipeline(
             # 4. Ultra Report generation
             logger.info("Generating Nemotron Ultra Confidence Report...")
             run.confidence_report = await generate_confidence_report(run, winner, all_nodes)
+            run.status = "complete"
             logger.info(f"Pipeline complete: verified winner {winner.node_id} with confidence {run.confidence_score}")
             return run, all_nodes
 
