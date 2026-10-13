@@ -11,7 +11,9 @@ const BRANCH_COLORS: Record<string, string> = {
 };
 const MODEL_SHORT: Record<string, string> = {
   'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B': 'Nano 30B',
+  'nvidia/nemotron-3-super-120b-a12b': 'Super 120B',
   'nvidia/Nemotron-Super-70B': 'Super 120B',
+  'nvidia/Nemotron-3-Ultra-550b-a55b': 'Ultra 550B',
   'nvidia/Nemotron-Ultra-253B': 'Ultra 550B',
   'none': 'None',
 };

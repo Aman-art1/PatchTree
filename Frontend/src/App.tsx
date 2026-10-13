@@ -56,16 +56,18 @@ function PatchNodeCard({ data }: { data: Record<string, unknown> }) {
   const isSelected = data.isSelected as boolean;
   const color = BRANCH_COLORS[node.branch_type] ?? '#6b7280';
   const passed = node.test_result === 'pass';
+  const isUltra = (node.model_used ?? '').toLowerCase().includes('ultra');
 
   return (
     <>
       <Handle type="target" position={Position.Top}
         style={{ background: color, border: 'none', width: 8, height: 8 }} />
       <div
-        className={`pnode${isSelected ? ' pnode--selected' : ''}${isWinner ? ' pnode--winner' : ''}`}
+        className={`pnode${isSelected ? ' pnode--selected' : ''}${isWinner ? ' pnode--winner' : ''}${isUltra ? ' pnode--ultra' : ''}`}
         style={{ '--branch-color': color } as React.CSSProperties}
       >
-        {isWinner && <div className="pnode__winner-badge">🏆 Winner</div>}
+        {isWinner && <div className="pnode__winner-badge">{isUltra ? '🏆 Winner ⚡ ULTRA' : '🏆 Winner'}</div>}
+        {isUltra && !isWinner && <div className="pnode__ultra-badge">⚡ ULTRA</div>}
         <div className="pnode__header">
           <span className="pnode__type">{BRANCH_LABELS[node.branch_type]}</span>
           <span className={`pnode__badge pnode__badge--${passed ? 'pass' : 'fail'}`}>

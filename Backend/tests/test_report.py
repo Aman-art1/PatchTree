@@ -92,8 +92,8 @@ async def _run(plan: dict[int, list[bool]], max_rounds: int = 2, full_suite_test
 
     async def fake_call_model(job, prompt, system_prompt=None, temperature=0.3):
         jobs.append(job)
-        if job == "replan_after_failure":
-            content = "1. a\n2. b\n3. c\n4. d"
+        if job == "generate_patch_ultra":
+            content = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-x\n+x+1\n"
         elif job == "generate_adversarial_test":
             content = "```python\ndef test_adversarial_edge_case():\n    assert True\n```"
         elif job == "generate_confidence_report":

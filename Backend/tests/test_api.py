@@ -133,9 +133,10 @@ class APITests(unittest.TestCase):
         final_run, tree = self.get_results(created["run_id"])
         self.assertEqual(final_run["status"], "failed")
         self.assertIsNone(final_run["winner_node_id"])
-        self.assertEqual(len(tree), 9)
+        # root + 4 search (all fail) + 1 ultra escalation (also fails) = 6
+        self.assertEqual(len(tree), 6)
         self.assertIsNotNone(final_run["confidence_report"])
-        self.assertTrue(all(node["test_result"] == "fail" for node in tree))
+        self.assertTrue(all(node["test_result"] in ("fail", "error") for node in tree))
 
     def test_pipeline_exception_marks_run_failed(self):
         with (

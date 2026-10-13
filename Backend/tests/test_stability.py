@@ -106,8 +106,8 @@ async def _run(plan: dict[int, list[bool]], max_rounds: int = 2):
 
     async def fake_call_model(job, prompt, system_prompt=None, temperature=0.3):
         jobs.append(job)
-        if job == "replan_after_failure":
-            content = "1. a\n2. b\n3. c\n4. d"
+        if job == "generate_patch_ultra":
+            content = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-x\n+x+1\n"
         elif job == "generate_adversarial_test":
             content = "```python\ndef test_adversarial_edge_case():\n    assert True\n```"
         elif job == "generate_confidence_report":
@@ -150,21 +150,27 @@ def test_pipeline_falls_back_to_second_candidate():
 
 
 def test_pipeline_replans_when_all_candidates_flaky():
+    # When all passing candidates fail stability, and at least one branch passed the
+    # initial test, the pipeline does NOT escalate to Ultra (Ultra only runs when ALL
+    # 4 branches fail outright). The pipeline reports failure.
     flaky = [T, T, F, T, T, T]
-    final, nodes, jobs = asyncio.run(_run({0: flaky, 1: flaky, 4: [T] * 9}))
-    r1, r2 = _search(nodes)[:4], _search(nodes)[4:]
-    assert r1[0].is_stable is False and r1[1].is_stable is False
-    assert jobs.count("replan_after_failure") == 1
-    assert final.status == "complete" and final.winner_node_id == r2[0].node_id
-    assert len(nodes) == 1 + 4 + 5 + 5 + 4 + 5 + 2 + 1
+    final, nodes, jobs = asyncio.run(_run({0: flaky, 1: flaky}))
+    search_nodes = _search(nodes)
+    # Both search branches that passed stability-checked (is_stable=False)
+    assert any(n.is_stable is False for n in search_nodes if n.test_result == "pass")
+    assert "replan_after_failure" not in jobs
+    assert "generate_patch_ultra" not in jobs  # Ultra only fires when ALL branches fail outright
+    assert final.status == "failed" and final.winner_node_id is None
 
 
 def test_pipeline_fails_when_always_flaky():
+    # All 4 branches pass the initial test but fail stability → pipeline fails without Ultra
     flaky = [T, F, F, F, F, F]
     final, nodes, jobs = asyncio.run(_run({i: flaky for i in range(8)}))
     assert final.status == "failed" and final.winner_node_id is None
     assert final.confidence_report is not None
     assert all(n.is_stable is False for n in nodes if n.branch_type == "search" and n.test_result == "pass")
+    assert "generate_patch_ultra" not in jobs  # Ultra only fires when ALL branches fail outright
 
 
 if __name__ == "__main__":

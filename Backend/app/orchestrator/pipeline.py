@@ -67,6 +67,14 @@ REPLAN_SYSTEM_PROMPT = (
     "as numbered lines 1-4, one concise sentence each."
 )
 
+ULTRA_SYNTHESIS_SYSTEM_PROMPT = (
+    "You are Nemotron Ultra, the most capable model in the PatchTree pipeline. "
+    "All 4 initial search attempts failed to fix this bug. "
+    "Carefully analyze every failed attempt — the hypothesis, the patch diff, and the pytest failure trace — "
+    "then synthesize a correct unified diff (--- a/... +++ b/...) that avoids the mistakes of all prior attempts. "
+    "Output ONLY the unified diff, with no prose before or after it."
+)
+
 ADVERSARIAL_SYSTEM_PROMPT = (
     "You are an adversarial tester. Given a bug description, the target test, and a "
     "candidate patch, write one pytest test function designed to break the patch: probe "
@@ -155,6 +163,91 @@ async def replan(run: Run, failed_branches: list[Node]) -> list[str]:
     guidance = _parse_guidance(response["content"])
     logger.info("Replan produced %d guidance strings", len(guidance))
     return guidance
+
+
+async def ultra_synthesize_patch(
+    run: Run,
+    failed_branches: list[Node],
+    parent_node: Node,
+    sandbox: SandboxManager,
+) -> Node:
+    """
+    Escalation path: Nemotron Ultra directly synthesizes a patch after all
+    initial search branches failed.
+
+    Ultra receives the bug description, target test, and the complete failure
+    context of every failed branch (hypothesis + patch diff + pytest trace),
+    then outputs a unified diff which is applied and tested immediately.
+
+    Args:
+        run: The Run being repaired.
+        failed_branches: All failed Nodes from round 1.
+        parent_node: The root Node to fork from.
+        sandbox: Sandbox to fork for patch application.
+
+    Returns:
+        A Node with branch_type="search" and model_used=Ultra's model name.
+    """
+    attempts = "\n\n".join(
+        f"--- Attempt {i + 1} ---\n"
+        f"hypothesis: {node.hypothesis or ''}\n"
+        f"patch diff:\n{node.patch_diff or ''}\n"
+        f"pytest failure trace:\n{node.test_output or ''}"
+        for i, node in enumerate(failed_branches)
+    )
+    prompt = (
+        f"Bug description: {run.bug_description}\n"
+        f"Target test command: {run.target_test}\n\n"
+        f"All {len(failed_branches)} patch attempts failed. Here is the full failure context:\n\n"
+        f"{attempts}\n\n"
+        "Write the corrected unified diff that fixes this bug, avoiding the mistakes above."
+    )
+    node_id = str(uuid.uuid4())
+    logger.info(f"Ultra escalation: synthesizing patch directly, node {node_id}")
+
+    response = await call_model(
+        job="generate_patch_ultra",
+        prompt=prompt,
+        system_prompt=ULTRA_SYNTHESIS_SYSTEM_PROMPT,
+    )
+    raw_content = response.get("content", "")
+    patch_diff = extract_diff(raw_content) or raw_content
+    hypothesis = f"ultra_synthesis: {patch_diff[:100]}..."
+
+    fork = sandbox.fork(parent_node.checkpoint_id)
+    apply_result = fork.run_command(f"apply_patch {node_id}.diff")
+    logger.debug(f"Ultra escalation: patch apply exit_code={apply_result.exit_code}")
+
+    if apply_result.exit_code != 0:
+        test_result: Literal["pass", "fail", "error"] = "error"
+        test_output = f"Patch application failed:\n{apply_result.output}"
+    else:
+        test_result_obj = fork.run_command(parent_node.test_command or run.target_test)
+        test_result = "pass" if test_result_obj.exit_code == 0 else "fail"
+        test_output = test_result_obj.output
+
+    checkpoint_id = fork.checkpoint()
+    node = Node(
+        node_id=node_id,
+        run_id=run.run_id,
+        parent_node_id=parent_node.node_id,
+        branch_type="search",
+        checkpoint_id=checkpoint_id,
+        hypothesis=hypothesis,
+        patch_diff=patch_diff,
+        test_command=parent_node.test_command or run.target_test,
+        test_result=test_result,
+        test_output=test_output,
+        model_used=response["model"],
+        tokens_in=response["tokens_in"],
+        tokens_out=response["tokens_out"],
+        status="done",
+    )
+    logger.info(
+        f"Ultra escalation: node {node_id} -> test_result={test_result}, "
+        f"tokens={response['tokens_in']}+{response['tokens_out']}"
+    )
+    return node
 
 
 def extract_diff(content: str) -> str:
@@ -487,11 +580,13 @@ async def run_pipeline(
 ) -> tuple[Run, list[Node]]:
     """
     End-to-end patch search state machine:
-    reproduce -> search_round -> evaluate_search -> replan -> repeat.
+    reproduce -> 4-branch search -> evaluate -> if all fail, Ultra synthesizes
+    directly -> stability -> adversarial -> full_suite -> report.
 
     Args:
         run: The Run to process.
-        max_rounds: Maximum number of search rounds before giving up.
+        max_rounds: Unused (kept for API compatibility). Ultra escalation is
+            always the single fallback after round 1 fails.
         sandbox: Optional sandbox instance (defaults to SandboxManager()).
         live_nodes: Optional mutable list that receives nodes in real-time.
 
@@ -511,71 +606,98 @@ async def run_pipeline(
     all_nodes.append(root_node)
     logger.info(f"Reproduce: root node {root_node.node_id} -> test_result={root_node.test_result}")
 
-    guidance: list[str] | None = None
-    for round_num in range(1, max_rounds + 1):
-        branches = await search_round(run, root_node, round_num=round_num, guidance=guidance, sandbox=sandbox)
-        all_nodes.extend(branches)
+    # ── Round 1: 4-branch concurrent search ───────────────────────────────────
+    branches = await search_round(run, root_node, round_num=1, sandbox=sandbox)
+    all_nodes.extend(branches)
 
-        winner: Node | None = None
-        for candidate in (b for b in branches if b.test_result == "pass"):
-            logger.info(f"Running stability check on candidate {candidate.node_id} (k=5)...")
-            stability_nodes = await check_stability(run, candidate, sandbox=sandbox, k=5)
-            all_nodes.extend(stability_nodes)
+    candidates: list[Node] = []
+    for b in branches:
+        if b.test_result == "pass":
+            candidates.append(b)
 
-            if candidate.is_stable:
-                winner = candidate
-                logger.info(f"Candidate {candidate.node_id} verified stable ({candidate.stability_passes}/{candidate.stability_runs})!")
-                break
-            logger.warning(
-                f"Candidate {candidate.node_id} demoted due to flakiness "
-                f"({candidate.stability_passes}/{candidate.stability_runs} passes)."
+    # ── Evaluate round-1 candidates through stability check ───────────────────
+    winner: Node | None = None
+    for candidate in candidates:
+        logger.info(f"Running stability check on candidate {candidate.node_id} (k=5)...")
+        stability_nodes = await check_stability(run, candidate, sandbox=sandbox, k=5)
+        all_nodes.extend(stability_nodes)
+        if candidate.is_stable:
+            winner = candidate
+            logger.info(
+                f"Candidate {candidate.node_id} verified stable "
+                f"({candidate.stability_passes}/{candidate.stability_runs})!"
             )
+            break
+        logger.warning(
+            f"Candidate {candidate.node_id} demoted due to flakiness "
+            f"({candidate.stability_passes}/{candidate.stability_runs} passes)."
+        )
 
-        if winner is not None:
-            # 1. Adversarial verification
-            logger.info(f"Running adversarial verification on winner {winner.node_id} (m=2)...")
-            adversarial_nodes = await check_adversarial(run, winner, sandbox=sandbox, m=2)
-            all_nodes.extend(adversarial_nodes)
-            # 2. Full-suite check
-            if (run.full_suite_test or "").strip():
-                logger.info(f"Running full suite check on winner {winner.node_id}...")
-                suite_node = await run_full_suite(run, winner, sandbox=sandbox)
-                if suite_node:
-                    all_nodes.append(suite_node)
+    # ── Escalation: Ultra direct patch synthesis if round 1 fully failed ──────
+    if winner is None and not any(b.test_result == "pass" for b in branches):
+        logger.info("Round 1: all 4 branches failed — escalating to Nemotron Ultra for direct patch synthesis")
+        ultra_node = await ultra_synthesize_patch(run, branches, root_node, sandbox)
+        all_nodes.append(ultra_node)
+
+        if ultra_node.test_result == "pass":
+            logger.info(f"Ultra synthesis passed — running stability check on {ultra_node.node_id}")
+            stability_nodes = await check_stability(run, ultra_node, sandbox=sandbox, k=5)
+            all_nodes.extend(stability_nodes)
+            if ultra_node.is_stable:
+                winner = ultra_node
+                logger.info(
+                    f"Ultra candidate {ultra_node.node_id} verified stable "
+                    f"({ultra_node.stability_passes}/{ultra_node.stability_runs})!"
+                )
             else:
-                logger.info("Full suite check skipped (no command specified).")
-                run.full_suite_result = "skipped"
+                logger.warning(
+                    f"Ultra candidate {ultra_node.node_id} flaky "
+                    f"({ultra_node.stability_passes}/{ultra_node.stability_runs} passes)."
+                )
+        else:
+            logger.warning(f"Ultra synthesis also failed: test_result={ultra_node.test_result}")
 
-            # 3. Confidence score calculation
-            stability_rate = (winner.stability_passes / winner.stability_runs) if winner.stability_runs else 1.0
-            adversarial_rate = (run.adversarial_survived / run.adversarial_runs) if run.adversarial_runs else 1.0
-            if run.full_suite_result == "skipped":
-                run.confidence_score = round(0.5 * stability_rate + 0.5 * adversarial_rate, 2)
-            else:
-                suite_rate = 1.0 if run.full_suite_result == "pass" else 0.0
-                run.confidence_score = round(0.4 * stability_rate + 0.4 * adversarial_rate + 0.2 * suite_rate, 2)
-            run.winner_node_id = winner.node_id
-            run.completed_at = datetime.now(timezone.utc)
-            if run.created_at:
-                run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
-            run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
-            # 4. Ultra Report generation
-            logger.info("Generating Nemotron Ultra Confidence Report...")
-            run.confidence_report = await generate_confidence_report(run, winner, all_nodes)
-            run.status = "complete"
-            logger.info(f"Pipeline complete: verified winner {winner.node_id} with confidence {run.confidence_score}")
-            return run, all_nodes
+    if winner is not None:
+        # 1. Adversarial verification
+        logger.info(f"Running adversarial verification on winner {winner.node_id} (m=2)...")
+        adversarial_nodes = await check_adversarial(run, winner, sandbox=sandbox, m=2)
+        all_nodes.extend(adversarial_nodes)
+        # 2. Full-suite check
+        if (run.full_suite_test or "").strip():
+            logger.info(f"Running full suite check on winner {winner.node_id}...")
+            suite_node = await run_full_suite(run, winner, sandbox=sandbox)
+            if suite_node:
+                all_nodes.append(suite_node)
+        else:
+            logger.info("Full suite check skipped (no command specified).")
+            run.full_suite_result = "skipped"
 
-        if round_num < max_rounds:
-            logger.info(f"Round {round_num}: no stable winner found; replanning with Nemotron Ultra")
-            guidance = await replan(run, list(branches))
+        # 3. Confidence score
+        stability_rate = (winner.stability_passes / winner.stability_runs) if winner.stability_runs else 1.0
+        adversarial_rate = (run.adversarial_survived / run.adversarial_runs) if run.adversarial_runs else 1.0
+        if run.full_suite_result == "skipped":
+            run.confidence_score = round(0.5 * stability_rate + 0.5 * adversarial_rate, 2)
+        else:
+            suite_rate = 1.0 if run.full_suite_result == "pass" else 0.0
+            run.confidence_score = round(0.4 * stability_rate + 0.4 * adversarial_rate + 0.2 * suite_rate, 2)
+        run.winner_node_id = winner.node_id
+        run.completed_at = datetime.now(timezone.utc)
+        if run.created_at:
+            run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
+        run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
+        # 4. Ultra Report
+        logger.info("Generating Nemotron Ultra Confidence Report...")
+        run.confidence_report = await generate_confidence_report(run, winner, all_nodes)
+        run.status = "complete"
+        logger.info(f"Pipeline complete: verified winner {winner.node_id} with confidence {run.confidence_score}")
+        return run, all_nodes
 
-    # If all rounds failed:
+    # All attempts (including Ultra) failed
     run.status = "failed"
     run.completed_at = datetime.now(timezone.utc)
     if run.created_at:
         run.total_wall_time_seconds = round((run.completed_at - run.created_at).total_seconds(), 2)
     run.total_cost_usd = round(sum(n.tokens_in + n.tokens_out for n in all_nodes) * 0.000001, 6)
     run.confidence_report = await generate_confidence_report(run, None, all_nodes)
-    logger.info(f"Pipeline failed: no passing patch after {max_rounds} rounds")
+    logger.info("Pipeline failed: no passing patch after round 1 + Ultra escalation")
     return run, all_nodes

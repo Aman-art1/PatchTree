@@ -32,6 +32,7 @@ ROUTES = {
     "generate_patch_root_cause": ("super", 0.6),
     "generate_patch_test_driven": ("nano", 0.2),
     "replan_after_failure": ("ultra", 0.3),
+    "generate_patch_ultra": ("ultra", 0.2),
     "generate_adversarial_test": ("super", 0.6),
     "generate_confidence_report": ("ultra", 0.3),
 }
@@ -45,7 +46,7 @@ async def call_model(job: str, prompt: str, system_prompt: str | None = None, te
     cfg = TIERS[tier]
     model = cfg["model"]
     base_url = cfg["base_url"]
-    temp = route_temp if job != "replan_after_failure" else temperature
+    temp = route_temp
 
     key = os.getenv("NEBIUS_API_KEY")
     if key:
@@ -83,6 +84,23 @@ async def call_model(job: str, prompt: str, system_prompt: str | None = None, te
             "model": f"stub/{model}",
             "tokens_in": len(prompt.split()),
             "tokens_out": 40,
+            "stub": True,
+        }
+
+    if job == "generate_patch_ultra":
+        return {
+            "content": (
+                "--- a/app.py\n"
+                "+++ b/app.py\n"
+                "@@ -1,3 +1,4 @@\n"
+                " def calculate(x):\n"
+                "-    return x\n"
+                "+    # Ultra fix: correct the return value after analysing all prior failures\n"
+                "+    return x + 1\n"
+            ),
+            "model": f"stub/{model}",
+            "tokens_in": len(prompt.split()),
+            "tokens_out": 60,
             "stub": True,
         }
 

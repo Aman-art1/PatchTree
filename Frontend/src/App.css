@@ -121,6 +121,19 @@ html,body,#root { height:100%; background:var(--bg-0); color:var(--text-1); font
   position:absolute; top:-2px; right:-2px; background:#fbbf24; color:#0a0e1a;
   font-size:0.58rem; font-weight:800; padding:2px 6px; border-radius:0 var(--radius) 0 6px;
 }
+/* Ultra escalation node — vibrant purple/gold glow */
+.pnode--ultra {
+  border-color:#a855f7 !important;
+  box-shadow:0 0 14px rgba(168,85,247,0.45), 0 0 6px rgba(251,191,36,0.25) !important;
+  background:linear-gradient(135deg,var(--bg-2) 70%,rgba(168,85,247,0.1));
+}
+.pnode__ultra-badge {
+  position:absolute; top:-2px; right:-2px;
+  background:linear-gradient(90deg,#7c3aed,#a855f7);
+  color:#f5f3ff; font-size:0.58rem; font-weight:800;
+  padding:2px 6px; border-radius:0 var(--radius) 0 6px;
+  letter-spacing:0.08em; box-shadow:0 0 8px rgba(168,85,247,0.6);
+}
 .pnode__header  { display:flex; align-items:center; justify-content:space-between; gap:6px; }
 .pnode__type    { font-size:0.68rem; font-weight:700; color:var(--branch-color,var(--text-1)); text-transform:uppercase; letter-spacing:0.05em; }
 .pnode__badge   { font-size:0.6rem; font-weight:700; padding:2px 5px; border-radius:4px; }
