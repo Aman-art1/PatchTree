@@ -25,6 +25,7 @@ REQUEST = {
     "repo_url": "https://github.com/example/repo",
     "bug_description": "Off-by-one error — expected 2, got 1 (测试)",
     "target_test": "pytest tests/test_bug.py",
+    "full_suite_test": "pytest",
 }
 
 

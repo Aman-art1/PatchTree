@@ -20,6 +20,7 @@ def _make_run() -> Run:
         repo_url="https://github.com/example/repo",
         bug_description="Function returns 1 instead of 2",
         target_test="pytest tests/test_bug.py",
+        full_suite_test="pytest",
     )
     return Run(run_id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc), **req.model_dump())
 

@@ -38,16 +38,19 @@ In production software, that is a coin flip dressed up as software engineering:
 
 ## 🔄 How Errors Are Solved: The Lifecycle
 
-PatchTree moves through five distinct verification stages:
+PatchTree moves through distinct verification stages:
 
 ```mermaid
 flowchart LR
-    A["1. Reproduce<br/>& Checkpoint"] --> B["2. 4-Branch<br/>Concurrent Search"]
-    B --> C{"3. Evaluate<br/>& Forensics"}
-    C -->|Pass| D["4. Stability &<br/>Adversarial Check"]
+    A["1. Reproduce<br/>& Checkpoint A"] --> B["2. 4-Branch<br/>Concurrent Search"]
+    B --> C{"3. Candidate<br/>Passed?"}
+    C -->|Yes| D["4. Stability Forensics<br/>(5 Parallel Forks)"]
     C -->|All Fail| E["5. Ultra Replan<br/>(Analyze Traces)"]
     E --> B
-    D --> F["6. Verified Patch<br/>+ Confidence Report"]
+    D -->|5/5 Stable| G["6. Adversarial Attacks<br/>(2 Attack Tests)"]
+    D -->|Flaky| E
+    G --> H["7. Full-Suite Check<br/>(Zero Regressions)"]
+    H --> I["8. Verified Patch<br/>+ Ultra Confidence Report"]
 ```
 
 1. **Reproduction & Checkpoint A**  
@@ -58,12 +61,15 @@ flowchart LR
    - **Branch 2 (Alternative Strategy — Nemotron Super):** Explores alternative implementations or refactoring.
    - **Branch 3 (Root-Cause Fix — Nemotron Super):** Investigates deeper causes across callers or dependencies.
    - **Branch 4 (Test-Driven Fix — Nemotron Nano):** Strictly implements expected contract specifications.
-3. **Flaky-Test Forensics**  
-   When a patch turns green, PatchTree does **not** stop there. It forks the winning checkpoint $k$ times ($k=5$) and re-runs the identical test command across all five forks in parallel to ensure the pass was deterministic.
-4. **Adversarial Self-Testing**  
-   A secondary model receives the code changes and attempts to generate targeted attack tests designed to break the fix. Patches that survive both stability checks and adversarial attacks earn high confidence.
-5. **Ultra-Tier Meta-Replan Loop**  
-   If all four branches fail in a round, Nemotron Ultra (550B) inspects the concatenated stdout/stderr traces from every failed attempt, diagnoses why they failed, and prescribes four revised strategies for the next round.
+3. **Flaky-Test Forensics (Stability Layer)**  
+   When a patch turns green, PatchTree does **not** stop there. It forks the winning checkpoint $k$ times ($k=5$) and re-runs the identical test command across all five forks in parallel to ensure the pass was deterministic. If any fork fails, the patch is demoted as flaky.
+4. **Adversarial Self-Testing (Attack Layer)**  
+   Nemotron Super (120B) inspects the patch diff and generates $m=2$ targeted attack test functions probing edge cases, boundary conditions, and floating-point quirks to verify the fix is not narrow.
+5. **Full-Suite Regression Verification**  
+   Runs the entire repository test suite (`pytest`) on the winning candidate checkpoint to guarantee zero regressions.
+6. **Ultra-Tier Confidence Reporting & Meta-Replan**  
+   - **If successful:** Nemotron Ultra (550B) synthesizes all telemetry (stability pass rate, attack survival, regression result, cost, and wall time) into an executive confidence report.
+   - **If all branches fail:** Nemotron Ultra diagnoses failure traces and synthesizes revised strategies for Round 2 (max 2 rounds), or generates an honest failure report.
 
 ---
 
@@ -72,7 +78,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     subgraph Reproduction ["1. Reproduce"]
-        Root["🚨 Root Node<br/>Confirm Test Failure & Checkpoint"]
+        Root["🚨 Root Node<br/>Confirm Test Failure & Checkpoint A"]
     end
 
     subgraph Search ["2. 4-Branch Concurrent Search"]
@@ -82,27 +88,31 @@ flowchart TD
         B4["Branch 4: Test-Driven Fix<br/>(Nemotron Nano)"]
     end
 
-    subgraph EvalJoin ["3. Evaluation & Forensics"]
-        Eval{"Evaluate<br/>Search"}
-        Stability["🛡️ Stability Forensics<br/>Parallel Forks to rule out flakiness"]
-        Replan["🧠 Meta-Replan<br/>(Nemotron Ultra analyzes traces)"]
+    subgraph Stability ["3. Flaky-Test Forensics"]
+        Stab["🛡️ Stability Forensics<br/>5 Parallel Forks (5/5 required)"]
     end
 
-    subgraph Verified ["4. Trust Report"]
+    subgraph Adversarial ["4. Adversarial & Full-Suite"]
+        Adv["⚔️ Adversarial Attacks<br/>2 Attack Tests (Nemotron Super)"]
+        Suite["🧪 Full Test Suite<br/>Zero Regressions Check"]
+    end
+
+    subgraph ReplanLoop ["Recovery Loop"]
+        Replan["🧠 Meta-Replan<br/>(Nemotron Ultra diagnoses traces)"]
+    end
+
+    subgraph Verified ["5. Trust Report"]
         Winner["✅ Verified Stable Patch<br/>Confidence Report + Diff"]
     end
 
-    Root -->|Fork State| B1
-    Root -->|Fork State| B2
-    Root -->|Fork State| B3
-    Root -->|Fork State| B4
-
-    B1 & B2 & B3 & B4 --> Eval
-    Eval -->|Passing Candidate| Stability
-    Eval -->|All Failed| Replan
+    Root -->|Fork A| B1 & B2 & B3 & B4
+    B1 & B2 & B3 & B4 -->|Passing Candidate| Stab
+    B1 & B2 & B3 & B4 -->|All Fail| Replan
     Replan -->|Revised Strategies| Search
-    Stability -->|Verified Stable| Winner
-    Stability -->|Flaky Failure| Replan
+    Stab -->|5/5 Stable Winner| Adv
+    Stab -->|Flaky Failure| Replan
+    Adv -->|Attack Tests| Suite
+    Suite --> Winner
 ```
 
 ---
@@ -119,7 +129,30 @@ flowchart TD
 | **Persistence** | **Supabase (PostgreSQL)** | Persistent storage for run metadata, node execution trees, and metrics. |
 | **Frontend** | **React + Vite + TypeScript** | Interactive live tree visualization (React Flow) and diff inspection panel. |
 
+
 ---
+
+## 🏛️ System Architecture: Backend & Frontend
+
+### ⚙️ Backend Core (`Backend/`)
+- **FastAPI Async Engine:** Manages background execution of repair runs and exposes RESTful endpoints (`POST /api/runs`, `GET /api/runs/{id}`, `GET /api/runs/{id}/tree`, `GET /api/runs/{id}/report`).
+- **Pipeline Orchestrator (`pipeline.py`):** Coordinates the 5 verification phases:
+  1. *Reproduction:* Sandboxed test run and baseline Checkpoint A creation.
+  2. *Concurrent Search:* 4 parallel forks exploring Minimal, Alternative, Root-Cause, and Test-Driven patches.
+  3. *Stability Forensics:* 5 parallel forks re-running tests to detect flaky candidates.
+  4. *Adversarial Hardening:* 2 attack forks generating targeted edge-case tests.
+  5. *Regression Verification:* Full-suite test run ensuring zero repo-wide breakage.
+- **Dynamic Model Router (`router.py`):** Automatically distributes tasks across NVIDIA Nemotron 3 Nano (30B), Super (120B), and Ultra (550B) to balance speed, intelligence, and cost.
+- **Cloud & Mock Sandboxing (`contree_client.py`):** Integrates Nebius Contree cloud container snapshots with automatic zero-dependency in-memory mocking for local offline tests.
+- **Persistence & Telemetry:** Persists run metadata and execution trees in Supabase (PostgreSQL), recording per-node wall time, token consumption, and dollar costs.
+
+### 💻 Frontend Dashboard (`Frontend/`)
+- **Modern Single-Page UI:** Built with React 19, TypeScript, and Vite for lightning-fast performance and clean UI styling.
+- **Live Tree DAG (`@xyflow/react` + `dagre`):** Automatically organizes the execution tree into a clear hierarchical layout, dynamically mapping parent-child relationships across all 13 nodes.
+- **Interactive Node Inspector:** Click any node to open a sliding inspection drawer displaying the unified diff patch, raw terminal outputs, model tier, and token metrics.
+- **Live Pipeline Stepper:** Visual status breadcrumb tracking real-time progress through Reproduce, Search, Stability, Adversarial, Full-Suite, and Ultra Report phases.
+- **Confidence Score & Report Modal:** Visual circular SVG score gauge alongside Nemotron Ultra's full Markdown evaluation report.
+- **Interactive Run Modal:** Allows submitting custom GitHub repositories and test commands, complete with one-click quick-fill presets for immediate testing.
 
 ## 📁 Repository Structure
 
@@ -173,27 +206,41 @@ cp .env.example .env
 ```
 
 ### 3. Run Verification Tests
-PatchTree includes automated suites verifying API endpoints, Nemotron LLM routing, and cloud sandboxes:
+PatchTree includes automated suites verifying all 5 verification layers:
 
 ```bash
-# Fast API & schema tests (0.06s)
+# 1. Fast API, schemas & 13-node tree tests
 python tests/test_api.py
 
-# Multi-branch Nemotron LLM search test
+# 2. Flaky-test stability forensics (5 forks)
+python tests/test_stability.py
+
+# 3. Adversarial attacks & survival verification
+python tests/test_adversarial.py
+
+# 4. Full-suite check & Nemotron Ultra confidence report
+python tests/test_report.py
+
+# 5. Multi-branch Nemotron search test
 python tests/test_search.py
 
-# Full evaluate & Ultra replan state machine test
-python tests/test_evaluate.py
-
-# Live Nebius Contree cloud sandbox test
+# 6. Live Nebius Contree cloud sandbox test
 python tests/test_real_contree.py
 ```
 
-### 4. Start Development API Server
+### 4. Start Development API Server (Port 8000)
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 Visit `http://localhost:8000/docs` to test interactive Swagger API endpoints.
+
+### 5. Start Frontend UI (Port 5173)
+```bash
+cd ../Frontend
+npm install
+npm run dev
+```
+Visit `http://localhost:5173` for the interactive tree visualization dashboard.
 
 ---
 
