@@ -123,7 +123,8 @@ async def _run(plan: dict[int, list[bool]], max_rounds: int = 2):
         return {"content": content, "model": "stub", "tokens_in": 1, "tokens_out": 1, "stub": True}
 
     run = Run(run_id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc),
-              repo_url="https://github.com/example/repo", bug_description="x", target_test="pytest t.py")
+              repo_url="https://github.com/example/repo", bug_description="x", target_test="pytest t.py",
+              full_suite_test="pytest")
     original, pipeline.call_model = pipeline.call_model, fake_call_model
     try:
         final, nodes = await pipeline.run_pipeline(run, max_rounds=max_rounds, sandbox=AdversarialSandbox(plan))

@@ -87,7 +87,7 @@ def _setup(sandbox: SandboxManager) -> tuple[Run, Node]:
     return run, cand
 
 
-async def _run(plan: dict[int, list[bool]], max_rounds: int = 2):
+async def _run(plan: dict[int, list[bool]], max_rounds: int = 2, full_suite_test: str | None = "pytest"):
     jobs: list[str] = []
 
     async def fake_call_model(job, prompt, system_prompt=None, temperature=0.3):
@@ -108,6 +108,7 @@ async def _run(plan: dict[int, list[bool]], max_rounds: int = 2):
         repo_url="https://github.com/example/repo",
         bug_description="x",
         target_test="pytest t.py",
+        full_suite_test=full_suite_test,
     )
     original, pipeline.call_model = pipeline.call_model, fake_call_model
     try:
@@ -252,6 +253,18 @@ def test_pipeline_honest_failure_report():
     assert not any(n.branch_type == "full_suite" for n in nodes)
 
 
+def test_pipeline_full_suite_skipped():
+    final, nodes, jobs = asyncio.run(_run({0: [T] * 8}, full_suite_test=None))
+    assert final.status == "complete"
+    assert final.full_suite_result == "skipped"
+    # 0.5 * 1.0 + 0.5 * 1.0 = 1.0
+    assert final.confidence_score == 1.0
+    assert not any(n.branch_type == "full_suite" for n in nodes)
+    # 1 root + 4 search + 5 stability + 2 adversarial = 12 nodes
+    assert len(nodes) == 12
+    assert final.confidence_report is not None
+
+
 if __name__ == "__main__":
     test_run_full_suite_pass()
     test_run_full_suite_fail()
@@ -260,4 +273,5 @@ if __name__ == "__main__":
     test_pipeline_produces_13_nodes_and_report()
     test_pipeline_full_suite_fail_lowers_confidence()
     test_pipeline_honest_failure_report()
+    test_pipeline_full_suite_skipped()
     print("OK")

@@ -422,9 +422,13 @@ async def run_full_suite(
     run: Run,
     candidate: Node,
     sandbox: SandboxManager,
-) -> Node:
-    """Runs the full repository test suite on the winning candidate checkpoint."""
-    cmd = run.full_suite_test or "pytest"
+) -> Node | None:
+    """Runs the full repository test suite on the winning candidate checkpoint if specified."""
+    cmd = (run.full_suite_test or "").strip()
+    if not cmd:
+        run.full_suite_result = "skipped"
+        return None
+
     fork = sandbox.fork(candidate.checkpoint_id)
     result = await asyncio.to_thread(fork.run_command, cmd)
     passed = result.exit_code == 0
@@ -526,14 +530,23 @@ async def run_pipeline(
             adversarial_nodes = await check_adversarial(run, winner, sandbox=sandbox, m=2)
             all_nodes.extend(adversarial_nodes)
             # 2. Full-suite check
-            logger.info(f"Running full suite check on winner {winner.node_id}...")
-            suite_node = await run_full_suite(run, winner, sandbox=sandbox)
-            all_nodes.append(suite_node)
+            if (run.full_suite_test or "").strip():
+                logger.info(f"Running full suite check on winner {winner.node_id}...")
+                suite_node = await run_full_suite(run, winner, sandbox=sandbox)
+                if suite_node:
+                    all_nodes.append(suite_node)
+            else:
+                logger.info("Full suite check skipped (no command specified).")
+                run.full_suite_result = "skipped"
+
             # 3. Confidence score calculation
             stability_rate = (winner.stability_passes / winner.stability_runs) if winner.stability_runs else 1.0
             adversarial_rate = (run.adversarial_survived / run.adversarial_runs) if run.adversarial_runs else 1.0
-            suite_rate = 1.0 if run.full_suite_result == "pass" else 0.0
-            run.confidence_score = round(0.4 * stability_rate + 0.4 * adversarial_rate + 0.2 * suite_rate, 2)
+            if run.full_suite_result == "skipped":
+                run.confidence_score = round(0.5 * stability_rate + 0.5 * adversarial_rate, 2)
+            else:
+                suite_rate = 1.0 if run.full_suite_result == "pass" else 0.0
+                run.confidence_score = round(0.4 * stability_rate + 0.4 * adversarial_rate + 0.2 * suite_rate, 2)
             run.status = "complete"
             run.winner_node_id = winner.node_id
             run.completed_at = datetime.now(timezone.utc)

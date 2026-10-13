@@ -8,7 +8,7 @@ class RunCreate(BaseModel):
     repo_url: str
     bug_description: str
     target_test: str
-    full_suite_test: Optional[str] = "pytest"
+    full_suite_test: Optional[str] = None
 
 
 class Run(RunCreate):
