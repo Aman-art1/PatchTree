@@ -94,14 +94,15 @@ class APITests(unittest.TestCase):
     def test_pipeline_complete_and_tree(self):
         captured_nodes = []
 
-        async def capture_pipeline(run):
-            final_run, created_nodes = await pipeline.run_pipeline(run)
+        async def capture_pipeline(run, *args, **kwargs):
+            final_run, created_nodes = await pipeline.run_pipeline(run, *args, **kwargs)
             captured_nodes.extend(created_nodes)
             return final_run, created_nodes
 
         with patch.object(main, "run_pipeline", side_effect=capture_pipeline) as task:
             created = self.create_run()
-            task.assert_awaited_once_with(main.runs[created["run_id"]])
+            self.assertEqual(task.await_count, 1)
+            self.assertEqual(task.call_args[0][0], main.runs[created["run_id"]])
 
         final_run, tree = self.get_results(created["run_id"])
         self.assertEqual(final_run["status"], "complete")
@@ -132,9 +133,10 @@ class APITests(unittest.TestCase):
         final_run, tree = self.get_results(created["run_id"])
         self.assertEqual(final_run["status"], "failed")
         self.assertIsNone(final_run["winner_node_id"])
-        self.assertEqual(len(tree), 9)
+        # root + 4 search (all fail) + 1 ultra escalation (also fails) = 6
+        self.assertEqual(len(tree), 6)
         self.assertIsNotNone(final_run["confidence_report"])
-        self.assertTrue(all(node["test_result"] == "fail" for node in tree))
+        self.assertTrue(all(node["test_result"] in ("fail", "error") for node in tree))
 
     def test_pipeline_exception_marks_run_failed(self):
         with (

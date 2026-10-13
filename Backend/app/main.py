@@ -1,6 +1,12 @@
 import logging
+import sys
 from datetime import datetime, timezone
 from uuid import uuid4
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,12 +29,12 @@ nodes: dict[str, list[Node]] = {}
 
 
 async def _run_pipeline(run: Run) -> None:
+    live_list = nodes.setdefault(run.run_id, [])
     try:
-        updated_run, created_nodes = await run_pipeline(run)
+        updated_run, _ = await run_pipeline(run, live_nodes=live_list)
         runs[run.run_id] = updated_run
-        nodes[run.run_id] = created_nodes
-    except Exception:
-        logger.exception("Pipeline failed for run %s", run.run_id)
+    except Exception as e:
+        logger.exception("Pipeline failed for run %s: %s", run.run_id, e)
         run.status = "failed"
         run.completed_at = datetime.now(timezone.utc)
         if run.created_at:
@@ -47,6 +53,11 @@ async def create_run(request: RunCreate, background_tasks: BackgroundTasks) -> R
     nodes[run.run_id] = []
     background_tasks.add_task(_run_pipeline, run)
     return run
+
+
+@app.get("/runs", response_model=list[Run])
+async def list_runs() -> list[Run]:
+    return list(runs.values())
 
 
 @app.get("/runs/{run_id}", response_model=Run)

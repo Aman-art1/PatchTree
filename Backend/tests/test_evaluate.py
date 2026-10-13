@@ -68,7 +68,7 @@ class SecondRoundPassSandbox(AlwaysFailingSandbox):
     """Stub sandbox that fails every test through call 5, then passes.
 
     Call 1 is the reproduce test; calls 2-5 are the round-1 branch tests, so
-    round 1 always fails and round 2 always passes.
+    round 1 always fails and the Ultra escalation (call 6) always passes.
     """
 
     test_calls = 0
@@ -194,8 +194,8 @@ async def test_run_pipeline_winner_round_1():
     print("test_run_pipeline_winner_round_1: all assertions passed")
 
 
-async def test_run_pipeline_replans_and_wins_round_2():
-    print("\n=== test_run_pipeline_replans_and_wins_round_2 ===")
+async def test_run_pipeline_ultra_escalation_wins():
+    print("\n=== test_run_pipeline_ultra_escalation_wins ===")
     run = _make_run()
     SecondRoundPassSandbox.test_calls = 0
 
@@ -204,10 +204,10 @@ async def test_run_pipeline_replans_and_wins_round_2():
 
     async def spy_call_model(job: str, prompt: str, system_prompt: str | None = None, temperature: float = 0.3) -> dict:
         jobs_called.append(job)
-        if job == "replan_after_failure":
+        if job == "generate_patch_ultra":
             return {
-                "content": "1. a\n2. b\n3. c\n4. d",
-                "model": "stub/nemotron-ultra",
+                "content": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-return 1\n+return 2\n",
+                "model": "stub/nvidia/Nemotron-3-Ultra-550b-a55b",
                 "tokens_in": 1,
                 "tokens_out": 1,
                 "stub": True,
@@ -223,13 +223,19 @@ async def test_run_pipeline_replans_and_wins_round_2():
         pipeline.call_model = real_call_model
         pipeline.SandboxManager = original_sandbox
 
-    assert "replan_after_failure" in jobs_called, "replan was not invoked after round 1 failed"
+    assert "generate_patch_ultra" in jobs_called, "Ultra synthesis was not invoked after round 1 failed"
+    assert "replan_after_failure" not in jobs_called, "replan should not be called in new architecture"
     assert final_run.status == "complete", f"expected complete, got {final_run.status}"
     assert final_run.winner_node_id is not None
-    assert len(all_nodes) == 17, f"expected root + 4 + 4 + 5 stability + 2 adversarial + 1 full_suite, got {len(all_nodes)}"
+    # root + 4 search (fail) + 1 ultra + 5 stability + 2 adversarial + 1 full_suite = 14
+    assert len(all_nodes) == 14, f"expected root+4+1 ultra+5 stability+2 adversarial+1 full_suite=14, got {len(all_nodes)}"
     assert final_run.confidence_report is not None
-    print(f"winner in round 2 after replan: {final_run.winner_node_id}")
-    print("test_run_pipeline_replans_and_wins_round_2: all assertions passed")
+    # Ultra node is the 6th node (index 5)
+    ultra_node = all_nodes[5]
+    assert ultra_node.branch_type == "search"
+    assert "Ultra" in ultra_node.model_used or "ultra" in ultra_node.model_used.lower()
+    print(f"Ultra winner: {final_run.winner_node_id}")
+    print("test_run_pipeline_ultra_escalation_wins: all assertions passed")
 
 
 async def test_run_pipeline_honest_failure():
@@ -245,17 +251,23 @@ async def test_run_pipeline_honest_failure():
 
     assert final_run.status == "failed", f"expected failed, got {final_run.status}"
     assert final_run.winner_node_id is None
-    assert len(all_nodes) == 9, f"expected root + 4 + 4 nodes, got {len(all_nodes)}"
+    # root + 4 search branches (all fail) + 1 ultra node (also fails) = 6
+    assert len(all_nodes) == 6, f"expected root+4 search+1 ultra=6 nodes, got {len(all_nodes)}"
     assert final_run.confidence_report is not None
     assert final_run.completed_at is not None
-    print(f"no winner after 2 rounds -> status: {final_run.status}, nodes: {len(all_nodes)}")
+    print(f"no winner after round 1 + Ultra -> status: {final_run.status}, nodes: {len(all_nodes)}")
     print("test_run_pipeline_honest_failure: all assertions passed")
 
 
-if __name__ == "__main__":
+async def _main():
     test_evaluate_search()
-    asyncio.run(test_replan())
-    asyncio.run(test_run_pipeline_winner_round_1())
-    asyncio.run(test_run_pipeline_replans_and_wins_round_2())
-    asyncio.run(test_run_pipeline_honest_failure())
+    await test_replan()
+    await test_run_pipeline_winner_round_1()
+    await test_run_pipeline_ultra_escalation_wins()
+    await test_run_pipeline_honest_failure()
     print("\nAll evaluate/replan tests passed!")
+
+
+
+if __name__ == "__main__":
+    asyncio.run(_main())
