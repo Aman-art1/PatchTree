@@ -46,7 +46,8 @@ export default function ReportModal({ run: initialRun, onClose }: Props) {
     }
   }, [run.run_id, run.confidence_report]);
 
-  const score = Math.round((run.confidence_score ?? 0) * 100);
+  const rawScore = run.confidence_score ?? 0;
+  const score = Math.round(rawScore <= 1 ? rawScore * 100 : rawScore);
 
   return (
     <div className="modal-overlay" onClick={onClose}>

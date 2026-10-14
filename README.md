@@ -187,7 +187,7 @@ PatchTree/
 ### 2. Setup Backend
 ```bash
 # Clone the repository
-git clone https://github.com/Aman-art1/PatchTree.git
+git clone https://github.com/icodesAS/PatchTree.git
 cd PatchTree/Backend
 
 # Create and activate virtual environment

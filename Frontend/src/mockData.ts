@@ -35,7 +35,7 @@ const nodes: PatchNode[] = [
     test_command: 'pytest tests/test_discount.py -v',
     test_result: 'pass',
     test_output: 'PASSED tests/test_discount.py::test_calculate_discount\n1 passed in 0.12s',
-    model_used: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B', status: 'done',
+    model_used: 'nvidia/nemotron-3-super-120b-a12b', status: 'done',
     tokens_in: 298, tokens_out: 72, estimated_cost_usd: 0.0011, wall_time_seconds: 3.9,
   },
   {
@@ -150,7 +150,7 @@ const run: Run = {
   run_id: RUN_ID,
   status: 'complete',
   winner_node_id: WINNER,
-  confidence_score: 94,
+  confidence_score: 0.94,
   adversarial_runs: 2,
   adversarial_survived: 2,
   full_suite_result: 'pass',

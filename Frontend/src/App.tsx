@@ -235,7 +235,7 @@ export default function App() {
             {run.confidence_score != null && (
               <div className="telemetry__item telemetry__item--highlight">
                 <Percent size={13} />
-                <span>{Math.round((run.confidence_score ?? 0) * 100)}%</span>
+                <span>{Math.round(run.confidence_score <= 1 ? run.confidence_score * 100 : run.confidence_score)}%</span>
               </div>
             )}
           </div>
